@@ -129,7 +129,10 @@
 
   <!-- Trade History Table -->
   <div class="panel history-panel">
-    <h2 class="panel-title">Trade History</h2>
+    <div class="history-header">
+      <h2 class="panel-title">Trade History</h2>
+      <span class="history-count" *ngIf="closedTrades.length">{{ closedTrades.length }} trades</span>
+    </div>
     <div class="empty-state" *ngIf="!closedTrades.length">No closed trades yet.</div>
     <div class="table-wrapper" *ngIf="closedTrades.length">
       <table class="trade-table">
@@ -148,7 +151,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let trade of closedTrades"
+          <tr *ngFor="let trade of pagedTrades"
             [class.win-row]="trade.outcome === 'win'"
             [class.loss-row]="trade.outcome === 'loss'">
             <td>
@@ -182,6 +185,15 @@
           </tr>
         </tbody>
       </table>
+
+      <div class="pagination" *ngIf="totalPages > 1">
+        <button class="page-btn" (click)="setPage(page - 1)" [disabled]="page === 1">‹</button>
+        <ng-container *ngFor="let p of pageNumbers">
+          <button class="page-btn" [class.active]="p === page" (click)="setPage(p)">{{ p }}</button>
+        </ng-container>
+        <button class="page-btn" (click)="setPage(page + 1)" [disabled]="page === totalPages">›</button>
+        <span class="page-info">Page {{ page }} of {{ totalPages }}</span>
+      </div>
     </div>
   </div>
 </div>

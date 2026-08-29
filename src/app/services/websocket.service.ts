@@ -32,6 +32,12 @@ export interface BarUpdate {
   bar: BarData;
 }
 
+export interface IndicatorUpdate {
+  symbol: string;
+  time: number;
+  indicators: Record<string, number>;
+}
+
 export interface Position {
   ticket: number;
   symbol: string;
@@ -55,6 +61,7 @@ export class WebSocketService implements OnDestroy {
   private priceSubject = new Subject<PriceData>();
   private barUpdateSubject = new Subject<BarUpdate>();
   private positionsSubject = new ReplaySubject<Position[]>(1);
+  private indicatorSubject = new Subject<IndicatorUpdate>();
   private connectedSubject = new BehaviorSubject<boolean>(false);
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
@@ -64,6 +71,7 @@ export class WebSocketService implements OnDestroy {
   price$: Observable<PriceData> = this.priceSubject.asObservable();
   barUpdate$: Observable<BarUpdate> = this.barUpdateSubject.asObservable();
   positions$: Observable<Position[]> = this.positionsSubject.asObservable();
+  indicatorUpdate$: Observable<IndicatorUpdate> = this.indicatorSubject.asObservable();
   connected$: Observable<boolean> = this.connectedSubject.asObservable();
 
   connect(): void {
@@ -93,6 +101,8 @@ export class WebSocketService implements OnDestroy {
             this.barUpdateSubject.next(parsed.data as BarUpdate);
           } else if (parsed.type === 'positions' && parsed.data) {
             this.positionsSubject.next(parsed.data as Position[]);
+          } else if (parsed.type === 'indicator_update' && parsed.data) {
+            this.indicatorSubject.next(parsed.data as IndicatorUpdate);
           }
         } catch (e) {
           console.error('[WS] Failed to parse message:', e);

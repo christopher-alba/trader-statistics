@@ -257,6 +257,67 @@ app.delete('/api/modify/:id', (req, res) => {
   res.json({ removed: true });
 });
 
+// --- Indicator data (MT5 → Angular) ---
+const indicatorsStore = {}; // { BTCUSD: { AO: [{time,value},...], RSI: [...] } }
+const INDICATOR_BUFFER = 3500;
+
+app.post('/api/indicators', (req, res) => {
+  const { symbol, time, indicators } = req.body;
+  if (!symbol || !indicators || !time) return res.status(400).json({ error: 'invalid' });
+  const sym = symbol.toUpperCase();
+  if (!indicatorsStore[sym]) indicatorsStore[sym] = {};
+
+  Object.entries(indicators).forEach(([name, value]) => {
+    if (!indicatorsStore[sym][name]) indicatorsStore[sym][name] = [];
+    const arr = indicatorsStore[sym][name];
+    const point = { time: Number(time), value: Number(value) };
+    // Replace last entry if same timestamp (forming bar), otherwise append
+    if (arr.length && arr[arr.length - 1].time === point.time) {
+      arr[arr.length - 1] = point;
+    } else {
+      arr.push(point);
+      if (arr.length > INDICATOR_BUFFER) arr.shift();
+    }
+  });
+
+  const msg = JSON.stringify({ type: 'indicator_update', data: { symbol: sym, time: Number(time), indicators } });
+  wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
+  res.json({ ok: true });
+});
+
+app.get('/api/indicators/:symbol', (req, res) => {
+  const data = indicatorsStore[req.params.symbol.toUpperCase()];
+  res.json(data || {});
+});
+
+app.post('/api/indicators/history', (req, res) => {
+  const { symbol, history } = req.body;
+  if (!symbol || !Array.isArray(history)) return res.status(400).json({ error: 'invalid' });
+  const sym = symbol.toUpperCase();
+  if (!indicatorsStore[sym]) indicatorsStore[sym] = {};
+
+  history.forEach(point => {
+    const { time, ...values } = point;
+    Object.entries(values).forEach(([name, value]) => {
+      if (!indicatorsStore[sym][name]) indicatorsStore[sym][name] = [];
+      indicatorsStore[sym][name].push({ time: Number(time), value: Number(value) });
+    });
+  });
+
+  // Deduplicate by time, sort, trim to buffer size
+  Object.keys(indicatorsStore[sym]).forEach(name => {
+    const map = new Map();
+    indicatorsStore[sym][name].forEach(p => map.set(p.time, p.value));
+    indicatorsStore[sym][name] = Array.from(map.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([time, value]) => ({ time, value }))
+      .slice(-INDICATOR_BUFFER);
+  });
+
+  console.log(`[API] Indicator history loaded for ${sym}: ${history.length} bars`);
+  res.json({ ok: true });
+});
+
 // --- Candlestick bars + live positions ---
 const barsStore = {}; // { BTCUSD: { timeframe, bars: [] } }
 let lastPositions = [];

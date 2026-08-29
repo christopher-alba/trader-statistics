@@ -4,11 +4,12 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import { Subscription } from 'rxjs';
 import {
   createChart, IChartApi, ISeriesApi,
   CrosshairMode, LineStyle, ColorType,
-  CandlestickSeries,
+  CandlestickSeries, LineSeries, HistogramSeries,
 } from 'lightweight-charts';
 import { TradeService } from '../../services/trade.service';
 import { WebSocketService, Position } from '../../services/websocket.service';
@@ -22,6 +23,7 @@ import { WebSocketService, Position } from '../../services/websocket.service';
 })
 export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('chartContainer') chartContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('indicatorPanesEl') indicatorPanesEl!: ElementRef<HTMLDivElement>;
 
   symbol = '';
   activeSymbol = '';
@@ -66,10 +68,31 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private lastPositionsJson = '';
   private tradeCooldownInterval?: ReturnType<typeof setInterval>;
+  private _syncingTimeAxis = false;
+  private _syncingCrosshair = false;
+
+  // ── Indicators ───────────────────────────────────────────────────
+  readonly AVAILABLE_INDICATORS = [
+    { name: 'AO',   label: 'Awesome Oscillator' },
+    { name: 'RSI',  label: 'RSI (14)' },
+    { name: 'MACD', label: 'MACD (12,26,9)' },
+  ];
+  showIndicatorPicker = false;
+  indicatorPanes: Map<string, {
+    el: HTMLDivElement;
+    chart: IChartApi;
+    series: ISeriesApi<any>[];
+    resizeObserver: ResizeObserver;
+  }> = new Map();
+
+  get availableToAdd() {
+    return this.AVAILABLE_INDICATORS.filter(i => !this.indicatorPanes.has(i.name));
+  }
 
   constructor(
     private tradeService: TradeService,
     private ws: WebSocketService,
+    private http: HttpClient,
     private cdr: ChangeDetectorRef,
     private ngZone: NgZone,
   ) {}
@@ -126,6 +149,12 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       this.cdr.detectChanges();
     }));
 
+    // Live indicator updates
+    this.subs.add(this.ws.indicatorUpdate$.subscribe(update => {
+      if (update.symbol !== this.activeSymbol) return;
+      this.applyIndicatorUpdate(update.time, update.indicators);
+    }));
+
     // Initial positions from HTTP
     this.tradeService.getPositions().subscribe({
       next: positions => {
@@ -138,17 +167,36 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     this.buildChart();
+    this.restoreState();
+  }
 
-    // Auto-load bars if the EA already pushed a symbol
-    this.tradeService.getPositions().subscribe({
-      next: positions => {
-        if (positions.length && !this.activeSymbol) {
-          this.symbol = positions[0].symbol;
-          this.loadBars();
-        }
-      },
-      error: () => {},
-    });
+  private _pendingIndicators: string[] = [];
+
+  private saveState(): void {
+    localStorage.setItem('chart_symbol', this.activeSymbol);
+    localStorage.setItem('chart_indicators', JSON.stringify(Array.from(this.indicatorPanes.keys())));
+    const range = this.chart?.timeScale().getVisibleRange();
+    if (range) localStorage.setItem('chart_range', JSON.stringify(range));
+  }
+
+  private restoreState(): void {
+    const savedSymbol = localStorage.getItem('chart_symbol');
+    this._pendingIndicators = JSON.parse(localStorage.getItem('chart_indicators') || '[]');
+
+    if (savedSymbol) {
+      this.symbol = savedSymbol;
+      this.loadBars();
+    } else {
+      this.tradeService.getPositions().subscribe({
+        next: positions => {
+          if (positions.length && !this.activeSymbol) {
+            this.symbol = positions[0].symbol;
+            this.loadBars();
+          }
+        },
+        error: () => {},
+      });
+    }
   }
 
   ngOnDestroy(): void {
@@ -156,6 +204,8 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     this.resizeObserver?.disconnect();
     this.chart?.remove();
     clearInterval(this.tradeCooldownInterval);
+    this.indicatorPanes.forEach(p => { p.resizeObserver.disconnect(); p.chart.remove(); });
+    this.indicatorPanes.clear();
   }
 
   private buildChart(): void {
@@ -175,6 +225,9 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
         borderColor: '#2a3347',
         timeVisible: true,
         secondsVisible: false,
+        fixLeftEdge: true,
+        fixRightEdge: false,
+        rightOffset: 10,
       },
       width: el.clientWidth,
       height: el.clientHeight,
@@ -198,6 +251,21 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       });
       this.resizeObserver.observe(el);
     });
+
+    // Main → all indicators: sync bar spacing (zoom) + scroll position separately
+    // Avoids setVisibleRange clamping past the last data point
+    this.chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+      if (this._syncingTimeAxis) return;
+      this._syncingTimeAxis = true;
+      const scrollPos  = this.chart!.timeScale().scrollPosition();
+      const barSpacing = (this.chart!.timeScale() as any).options().barSpacing as number;
+      this.indicatorPanes.forEach(pane => {
+        if (!pane.chart) return;
+        try { pane.chart.timeScale().applyOptions({ barSpacing }); } catch {}
+        try { pane.chart.timeScale().scrollToPosition(scrollPos, false); } catch {}
+      });
+      this._syncingTimeAxis = false;
+    });
   }
 
   loadBars(): void {
@@ -209,8 +277,27 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     this.tradeService.getBars(sym).subscribe({
       next: data => {
         this.candleSeries?.setData(data.bars as any);
-        this.chart?.timeScale().fitContent();
         this.timeframeLabel = this.formatTimeframe(data.timeframe);
+
+        // Restore saved range or fit content
+        const savedRange = localStorage.getItem('chart_range');
+        if (savedRange) {
+          try { this.chart?.timeScale().setVisibleRange(JSON.parse(savedRange)); }
+          catch { this.chart?.timeScale().fitContent(); }
+        } else {
+          this.chart?.timeScale().fitContent();
+        }
+
+        this.loadIndicatorHistory(sym);
+
+        // Restore indicators after bars + range are set so they sync correctly
+        if (this._pendingIndicators.length) {
+          const toRestore = [...this._pendingIndicators];
+          this._pendingIndicators = [];
+          setTimeout(() => toRestore.forEach(name => this.addIndicator(name)), 50);
+        }
+
+        this.saveState();
 
         // Re-apply positions for this symbol
         this.tradeService.getPositions().subscribe({
@@ -362,6 +449,179 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       this.cdr.detectChanges();
     }, 1000);
+  }
+
+  // ── Indicator pane management ─────────────────────────────────────
+
+  addIndicator(name: string): void {
+    if (this.indicatorPanes.has(name)) return;
+    this.showIndicatorPicker = false;
+
+    const el = document.createElement('div');
+    el.className = 'indicator-pane';
+
+    const header = document.createElement('div');
+    header.className = 'ind-pane-header';
+    const def = this.AVAILABLE_INDICATORS.find(i => i.name === name)!;
+    header.innerHTML = `<span class="ind-pane-label">${def.label}</span>`;
+    el.appendChild(header);
+
+    const canvas = document.createElement('div');
+    canvas.className = 'ind-pane-canvas';
+    el.appendChild(canvas);
+
+    this.indicatorPanesEl.nativeElement.appendChild(el);
+
+    // Placeholder so removeIndicator works before chart is ready
+    this.indicatorPanes.set(name, { el, chart: null as any, series: [], resizeObserver: null as any });
+    this.saveState();
+    this.cdr.detectChanges();
+
+    // Defer chart creation until the canvas is laid out and has real dimensions
+    requestAnimationFrame(() => {
+      const w = canvas.offsetWidth  || 600;
+      const h = canvas.offsetHeight || 120;
+
+      const indChart = createChart(canvas, {
+        layout: { background: { type: ColorType.Solid, color: '#151e2d' }, textColor: '#64748b' },
+        grid: { vertLines: { color: '#1e2d42' }, horzLines: { color: '#1e2d42' } },
+        rightPriceScale: { borderColor: '#2a3347', scaleMargins: { top: 0.1, bottom: 0.1 } },
+        timeScale: {
+          borderColor: '#2a3347',
+          timeVisible: true,
+          secondsVisible: false,
+          visible: false,
+          rightOffset: 10,
+          fixRightEdge: false,
+          fixLeftEdge: false,
+        },
+        crosshair: { mode: CrosshairMode.Normal },
+        width: w,
+        height: h,
+      } as any);
+
+      const series: ISeriesApi<any>[] = [];
+      if (name === 'AO') {
+        series.push(indChart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }));
+      } else if (name === 'RSI') {
+        series.push(indChart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true }));
+      } else if (name === 'MACD') {
+        series.push(indChart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }));
+        series.push(indChart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }));
+        series.push(indChart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }));
+      }
+
+      // No reverse sync — main chart is the single source of truth for position/zoom
+
+      // Align new indicator to the main chart's current bar spacing + scroll position
+      const initScroll  = this.chart?.timeScale().scrollPosition();
+      const initSpacing = (this.chart?.timeScale() as any)?.options()?.barSpacing as number | undefined;
+      if (initSpacing) try { indChart.timeScale().applyOptions({ barSpacing: initSpacing }); } catch {}
+      if (initScroll !== undefined) try { indChart.timeScale().scrollToPosition(initScroll, false); } catch {}
+
+      // Crosshair sync: main → this indicator
+      this.chart?.subscribeCrosshairMove(param => {
+        if (this._syncingCrosshair || !series[0]) return;
+        this._syncingCrosshair = true;
+        if (param.time) indChart.setCrosshairPosition(NaN, param.time, series[0]);
+        else            indChart.clearCrosshairPosition();
+        this._syncingCrosshair = false;
+      });
+
+      // Crosshair sync: indicator → main + other indicators
+      indChart.subscribeCrosshairMove(param => {
+        if (this._syncingCrosshair) return;
+        this._syncingCrosshair = true;
+        if (param.time) {
+          if (this.candleSeries) this.chart?.setCrosshairPosition(NaN, param.time, this.candleSeries);
+          this.indicatorPanes.forEach((p, n) => {
+            if (n !== name && p.chart && p.series[0])
+              p.chart.setCrosshairPosition(NaN, param.time!, p.series[0]);
+          });
+        } else {
+          this.chart?.clearCrosshairPosition();
+          this.indicatorPanes.forEach((p, n) => {
+            if (n !== name && p.chart) p.chart.clearCrosshairPosition();
+          });
+        }
+        this._syncingCrosshair = false;
+      });
+
+      const ro = new ResizeObserver(() => {
+        indChart.applyOptions({ width: canvas.offsetWidth, height: canvas.offsetHeight });
+      });
+      ro.observe(canvas);
+
+      this.indicatorPanes.set(name, { el, chart: indChart, series, resizeObserver: ro });
+
+      // Load existing history
+      if (this.activeSymbol) this.loadIndicatorHistory(this.activeSymbol);
+    });
+  }
+
+  removeIndicator(name: string): void {
+    const pane = this.indicatorPanes.get(name);
+    if (!pane) return;
+    pane.resizeObserver.disconnect();
+    pane.chart.remove();
+    pane.el.remove();
+    this.indicatorPanes.delete(name);
+    this.saveState();
+    this.cdr.detectChanges();
+  }
+
+  private loadIndicatorHistory(symbol: string): void {
+    if (!this.indicatorPanes.size) return;
+    this.http.get<Record<string, { time: number; value: number }[]>>(`http://localhost:3000/api/indicators/${symbol}`)
+      .subscribe({ next: data => this.applyIndicatorHistory(data), error: () => {} });
+  }
+
+  private dedup(points: { time: number; value: number }[]): { time: number; value: number }[] {
+    const seen = new Map<number, number>();
+    points.forEach(p => seen.set(p.time, p.value));
+    return Array.from(seen.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([time, value]) => ({ time, value }));
+  }
+
+  private applyIndicatorHistory(data: Record<string, { time: number; value: number }[]>): void {
+    this.indicatorPanes.forEach((pane, name) => {
+      if (!pane.chart) return;
+      if (name === 'AO' && data['AO']) {
+        pane.series[0].setData(this.dedup(data['AO']).map(p => ({
+          time: p.time as any, value: p.value, color: p.value >= 0 ? '#22c55e' : '#ef4444',
+        })));
+      } else if (name === 'RSI' && data['RSI']) {
+        pane.series[0].setData(this.dedup(data['RSI']).map(p => ({ time: p.time as any, value: p.value })));
+      } else if (name === 'MACD' && data['MACD_hist']) {
+        pane.series[0].setData(this.dedup(data['MACD_hist']   || []).map(p => ({ time: p.time as any, value: p.value, color: p.value >= 0 ? '#22c55e' : '#ef4444' })));
+        pane.series[1].setData(this.dedup(data['MACD_main']   || []).map(p => ({ time: p.time as any, value: p.value })));
+        pane.series[2].setData(this.dedup(data['MACD_signal'] || []).map(p => ({ time: p.time as any, value: p.value })));
+      }
+    });
+  }
+
+  private applyIndicatorUpdate(time: number, indicators: Record<string, number>): void {
+    this.indicatorPanes.forEach((pane, name) => {
+      if (!pane.chart) return;
+      const t = time as any;
+      if (name === 'AO' && indicators['AO'] !== undefined) {
+        const v = indicators['AO'];
+        pane.series[0].update({ time: t, value: v, color: v >= 0 ? '#22c55e' : '#ef4444' });
+      } else if (name === 'RSI' && indicators['RSI'] !== undefined) {
+        pane.series[0].update({ time: t, value: indicators['RSI'] });
+      } else if (name === 'MACD' && indicators['MACD_hist'] !== undefined) {
+        const h = indicators['MACD_hist'];
+        pane.series[0].update({ time: t, value: h, color: h >= 0 ? '#22c55e' : '#ef4444' });
+        pane.series[1].update({ time: t, value: indicators['MACD_main'] });
+        pane.series[2].update({ time: t, value: indicators['MACD_signal'] });
+      }
+    });
+  }
+
+  indicatorPanesList(): { name: string; label: string }[] {
+    return Array.from(this.indicatorPanes.keys())
+      .map(name => ({ name, label: this.AVAILABLE_INDICATORS.find(i => i.name === name)!.label }));
   }
 
   closePosition(ticket: number): void {

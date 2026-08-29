@@ -53,6 +53,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     closeNotes: '',
   };
 
+  page = 1;
+  pageSize = 20;
+
+  get totalPages(): number { return Math.ceil(this.closedTrades.length / this.pageSize); }
+  get pagedTrades() { return this.closedTrades.slice((this.page - 1) * this.pageSize, this.page * this.pageSize); }
+  get pageNumbers(): number[] { return Array.from({ length: this.totalPages }, (_, i) => i + 1); }
+  setPage(p: number) { if (p >= 1 && p <= this.totalPages) this.page = p; }
+
   private charts: Chart[] = [];
   private subs = new Subscription();
   private clockInterval: ReturnType<typeof setInterval> | null = null;
@@ -81,6 +89,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.wsService.messages$.subscribe((data: TradeData) => {
         this.openTrades = data.open;
         this.closedTrades = data.closed;
+        this.page = 1;
         this.updateCharts();
         this.cdr.detectChanges();
       })

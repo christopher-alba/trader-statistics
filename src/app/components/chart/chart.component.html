@@ -6,6 +6,17 @@
       <span *ngIf="timeframeLabel" class="tf-badge">{{ timeframeLabel }}</span>
     </div>
     <div class="toolbar-right">
+      <div class="indicator-picker-wrap">
+        <button class="btn btn-secondary ind-btn" (click)="showIndicatorPicker = !showIndicatorPicker">
+          + Indicator
+        </button>
+        <div class="ind-dropdown" *ngIf="showIndicatorPicker">
+          <div *ngIf="!availableToAdd.length" class="ind-dropdown-empty">All indicators added</div>
+          <button *ngFor="let ind of availableToAdd" class="ind-dropdown-item" (click)="addIndicator(ind.name)">
+            {{ ind.label }}
+          </button>
+        </div>
+      </div>
       <div class="symbol-input-group">
         <input
           type="text"
@@ -22,7 +33,18 @@
   <div class="chart-error" *ngIf="loadError">{{ loadError }}</div>
 
   <div class="chart-body">
-    <div #chartContainer class="chart-container"></div>
+    <div class="chart-area">
+      <div #chartContainer class="chart-container"></div>
+      <div #indicatorPanesEl class="indicator-panes-host">
+        <!-- active indicator label/remove pills -->
+        <div class="ind-pane-pills" *ngIf="indicatorPanesList().length">
+          <span *ngFor="let ind of indicatorPanesList()" class="ind-pill">
+            {{ ind.label }}
+            <button class="ind-pill-remove" (click)="removeIndicator(ind.name)">✕</button>
+          </span>
+        </div>
+      </div>
+    </div>
 
     <!-- Positions panel -->
     <div class="positions-panel">

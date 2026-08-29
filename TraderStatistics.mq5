@@ -27,8 +27,16 @@ string   g_ChartSymbol       = "";   // symbol bars were last sent for
 datetime g_LastBarTick       = 0;    // rate-limit bar updates to once per second
 uint     g_LastTickMs        = 0;    // millisecond timestamp of last OnTick post
 uint     g_LastAccountMs    = 0;    // millisecond timestamp of last account post
+uint     g_LastIndicatorMs  = 0;    // millisecond timestamp of last indicator post
+bool     g_IndicatorHistorySent = false; // send full history once handles are warm
 input int TickIntervalMs    = 50;   // min ms between tick-driven updates
 input int AccountIntervalMs = 500;  // min ms between account posts
+input int IndicatorIntervalMs = 500; // min ms between indicator posts
+
+// Indicator handles
+int g_AO_Handle   = INVALID_HANDLE;
+int g_RSI_Handle  = INVALID_HANDLE;
+int g_MACD_Handle = INVALID_HANDLE;
 
 //+------------------------------------------------------------------+
 //| Init                                                             |
@@ -46,9 +54,15 @@ int OnInit()
    else
       Print("[TS] WARNING: server not reachable (code=", code, "). Is npm run dev running?");
 
+   // Create indicator handles for the current chart
+   g_AO_Handle   = iAO(Symbol(), PERIOD_CURRENT);
+   g_RSI_Handle  = iRSI(Symbol(), PERIOD_CURRENT, 14, PRICE_CLOSE);
+   g_MACD_Handle = iMACD(Symbol(), PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
+
    PostAccountBalance();
    SendHistoricalBars(Symbol(), PERIOD_CURRENT, 3000);
    SendOpenPositions();
+   // Indicator history is sent from OnTimer once handles finish initializing
    return INIT_SUCCEEDED;
 }
 
@@ -84,6 +98,11 @@ void OnTick()
       PostAccountBalance();
    }
    SendOpenPositions();
+   if(now - g_LastIndicatorMs >= (uint)IndicatorIntervalMs)
+   {
+      g_LastIndicatorMs = now;
+      PostIndicators();
+   }
 
    // Update the forming candle at most once per second
    datetime nowSec = TimeCurrent();
@@ -99,6 +118,17 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // Send full indicator history once — wait until handles have calculated enough bars
+   if(!g_IndicatorHistorySent && g_AO_Handle != INVALID_HANDLE)
+   {
+      double probe[];
+      if(CopyBuffer(g_AO_Handle, 0, 1, 50, probe) >= 50)
+      {
+         SendHistoricalIndicators(Symbol(), PERIOD_CURRENT, 3000);
+         g_IndicatorHistorySent = true;
+      }
+   }
+
    PollCloseCommands();
    PollModifyCommands();
 
@@ -393,6 +423,100 @@ void PostAccountBalance()
 
    if(PostRequest(ServerUrl + "/api/account", json))
       Print("[TS] Account posted: balance=", balance, " equity=", equity, " margin=", margin, " ", currency);
+}
+
+//+------------------------------------------------------------------+
+//| Send latest indicator values (MT5 → Angular)                    |
+//+------------------------------------------------------------------+
+void PostIndicators()
+{
+   if(g_AO_Handle == INVALID_HANDLE || g_RSI_Handle == INVALID_HANDLE || g_MACD_Handle == INVALID_HANDLE)
+      return;
+
+   double ao_buf[], rsi_buf[], macd_main[], macd_signal[];
+   ArraySetAsSeries(ao_buf,     true);
+   ArraySetAsSeries(rsi_buf,    true);
+   ArraySetAsSeries(macd_main,  true);
+   ArraySetAsSeries(macd_signal,true);
+
+   if(CopyBuffer(g_AO_Handle,   0, 0, 1, ao_buf)      <= 0) return;
+   if(CopyBuffer(g_RSI_Handle,  0, 0, 1, rsi_buf)     <= 0) return;
+   if(CopyBuffer(g_MACD_Handle, 0, 0, 1, macd_main)   <= 0) return;
+   if(CopyBuffer(g_MACD_Handle, 1, 0, 1, macd_signal) <= 0) return;
+   if(ao_buf[0] == EMPTY_VALUE || rsi_buf[0] == EMPTY_VALUE ||
+      macd_main[0] == EMPTY_VALUE || macd_signal[0] == EMPTY_VALUE) return;
+
+   datetime barTime = iTime(Symbol(), PERIOD_CURRENT, 0);
+   double   macdHist = macd_main[0] - macd_signal[0];
+
+   string json = "{";
+   json += "\"symbol\":\"" + Symbol() + "\",";
+   json += "\"time\":"     + IntegerToString((long)barTime) + ",";
+   json += "\"indicators\":{";
+   json += "\"AO\":"         + DoubleToString(ao_buf[0],    5) + ",";
+   json += "\"RSI\":"        + DoubleToString(rsi_buf[0],   2) + ",";
+   json += "\"MACD_main\":"  + DoubleToString(macd_main[0], 5) + ",";
+   json += "\"MACD_signal\":" + DoubleToString(macd_signal[0], 5) + ",";
+   json += "\"MACD_hist\":"  + DoubleToString(macdHist,     5);
+   json += "}}";
+
+   PostRequest(ServerUrl + "/api/indicators", json);
+}
+
+//+------------------------------------------------------------------+
+//| Send historical indicator values on startup                      |
+//+------------------------------------------------------------------+
+void SendHistoricalIndicators(string symbol, ENUM_TIMEFRAMES tf, int count)
+{
+   if(g_AO_Handle == INVALID_HANDLE || g_RSI_Handle == INVALID_HANDLE || g_MACD_Handle == INVALID_HANDLE)
+      return;
+
+   double ao_buf[], rsi_buf[], macd_main[], macd_signal[];
+   datetime times[];
+   ArraySetAsSeries(ao_buf,     false);
+   ArraySetAsSeries(rsi_buf,    false);
+   ArraySetAsSeries(macd_main,  false);
+   ArraySetAsSeries(macd_signal,false);
+   ArraySetAsSeries(times,      false);
+
+   int copied = CopyBuffer(g_AO_Handle, 0, 1, count, ao_buf);
+   if(copied <= 0) return;
+   CopyBuffer(g_RSI_Handle,  0, 1, copied, rsi_buf);
+   CopyBuffer(g_MACD_Handle, 0, 1, copied, macd_main);
+   CopyBuffer(g_MACD_Handle, 1, 1, copied, macd_signal);
+   CopyTime(symbol, tf, 1, copied, times);
+
+   // Send in chunks of 200
+   int chunkSize = 200;
+   int chunks = (int)MathCeil((double)copied / chunkSize);
+   for(int chunk = 0; chunk < chunks; chunk++)
+   {
+      int from = chunk * chunkSize;
+      int to   = MathMin(from + chunkSize, copied);
+
+      string json = "{\"symbol\":\"" + symbol + "\",\"history\":[";
+      for(int i = from; i < to; i++)
+      {
+         double hist = macd_main[i] - macd_signal[i];
+         if(ao_buf[i] == EMPTY_VALUE || rsi_buf[i] == EMPTY_VALUE ||
+            macd_main[i] == EMPTY_VALUE || macd_signal[i] == EMPTY_VALUE) continue;
+         if(i > from) json += ",";
+         json += "{\"time\":"         + IntegerToString((long)times[i]) + ",";
+         json += "\"AO\":"            + DoubleToString(ao_buf[i],     5) + ",";
+         json += "\"RSI\":"           + DoubleToString(rsi_buf[i],    2) + ",";
+         json += "\"MACD_main\":"     + DoubleToString(macd_main[i],  5) + ",";
+         json += "\"MACD_signal\":"   + DoubleToString(macd_signal[i],5) + ",";
+         json += "\"MACD_hist\":"     + DoubleToString(hist,          5) + "}";
+      }
+      json += "]}";
+
+      if(!PostRequest(ServerUrl + "/api/indicators/history", json))
+      {
+         Print("[TS] Indicator history chunk failed");
+         return;
+      }
+   }
+   Print("[TS] Sent ", copied, " historical indicator bars for ", symbol);
 }
 
 //+------------------------------------------------------------------+
