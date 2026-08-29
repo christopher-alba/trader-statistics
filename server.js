@@ -226,6 +226,39 @@ app.delete('/api/close/:id', (req, res) => {
   res.json({ removed: true });
 });
 
+// --- Margin calc (Angular → MT5 → Angular) ---
+let marginCalcRequest = null;  // { symbol, direction, lots }
+let marginCalcResult  = null;  // { margin } or null
+
+// Angular posts a calc request; MT5 polls it, computes, and posts back the result
+app.post('/api/calc-margin/request', (req, res) => {
+  const { symbol, direction, riskNzd, slPct, slFixed } = req.body;
+  if (!symbol || !riskNzd) return res.status(400).json({ error: 'invalid' });
+  marginCalcRequest = {
+    symbol: symbol.toUpperCase(),
+    direction: direction || 'buy',
+    riskNzd: parseFloat(riskNzd),
+    slPct:   parseFloat(slPct)   || 0,
+    slFixed: parseFloat(slFixed) || 0,
+  };
+  marginCalcResult = null;
+  res.json({ ok: true });
+});
+
+app.get('/api/calc-margin/request', (req, res) => {
+  res.json(marginCalcRequest || {});
+});
+
+app.post('/api/calc-margin/result', (req, res) => {
+  marginCalcResult = { margin: parseFloat(req.body.margin) || 0 };
+  marginCalcRequest = null;
+  res.json({ ok: true });
+});
+
+app.get('/api/calc-margin/result', (req, res) => {
+  res.json(marginCalcResult || null);
+});
+
 // --- SL/TP modify queue (Angular → MT5) ---
 const modifyQueue = [];
 

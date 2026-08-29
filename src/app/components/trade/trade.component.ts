@@ -69,6 +69,10 @@ export class TradeComponent implements OnInit, OnDestroy {
         this.balanceFromMt5 = true;
       }
     });
+    // Live ask price for investment calculation
+    this.ws.price$.subscribe(p => {
+      if (p.symbol === this.symbol.trim().toUpperCase()) this.currentAsk = p.ask;
+    });
   }
 
   ngOnDestroy() {
@@ -109,6 +113,34 @@ export class TradeComponent implements OnInit, OnDestroy {
   get maxRisk(): number    { return +(this.balance * 0.1).toFixed(2); }
   get overLimit(): boolean { return this.balance > 0 && this.riskNzd > this.maxRisk; }
   get slNzd(): number      { return this.riskNzd; }
+
+  currentAsk = 0;
+  marginNzd: number | null = null;
+  private marginDebounce?: ReturnType<typeof setTimeout>;
+
+  requestMarginCalc(): void {
+    const sym = this.symbol.trim().toUpperCase();
+    if (!sym || !this.riskNzd) { this.marginNzd = null; return; }
+    const slPct   = this.slMode === 'pct'   ? this.slPct   : 0;
+    const slFixed = this.slMode === 'fixed' ? this.slFixed : 0;
+    if (!slPct && !slFixed) { this.marginNzd = null; return; }
+    clearTimeout(this.marginDebounce);
+    this.marginDebounce = setTimeout(() => {
+      this.tradeService.requestMarginCalc(sym, this.direction, this.riskNzd, slPct, slFixed)
+        .subscribe({ next: () => this.pollMarginResult(), error: () => {} });
+    }, 400);
+  }
+
+  private pollMarginResult(attempts = 0): void {
+    if (attempts > 15) return;
+    this.tradeService.getMarginCalcResult().subscribe({
+      next: r => {
+        if (r?.margin != null) { this.marginNzd = r.margin; }
+        else setTimeout(() => this.pollMarginResult(attempts + 1), 200);
+      },
+      error: () => {},
+    });
+  }
   get tpNzd(): number      { return this.effectiveTp; }
   get rrRatio(): string | null {
     if (!this.riskNzd || !this.effectiveTp) return null;

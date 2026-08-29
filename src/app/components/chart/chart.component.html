@@ -54,25 +54,25 @@
       <div class="open-trade-section">
         <div class="panel-section-title">Open Trade</div>
         <div class="dir-row">
-          <button class="dir-btn buy" [class.active]="tradeDirection === 'buy'" (click)="tradeDirection = 'buy'">▲ Buy</button>
-          <button class="dir-btn sell" [class.active]="tradeDirection === 'sell'" (click)="tradeDirection = 'sell'">▼ Sell</button>
+          <button class="dir-btn buy" [class.active]="tradeDirection === 'buy'" (click)="tradeDirection = 'buy'; requestMarginCalc()">▲ Buy</button>
+          <button class="dir-btn sell" [class.active]="tradeDirection === 'sell'" (click)="tradeDirection = 'sell'; requestMarginCalc()">▼ Sell</button>
         </div>
         <div class="trade-field">
           <div class="invest-mode-row">
             <label>Risk $NZD if SL hit</label>
             <div class="mode-toggle">
-              <button [class.active]="riskMode === 'pct'"   (click)="riskMode = 'pct'">% Balance</button>
-              <button [class.active]="riskMode === 'fixed'" (click)="riskMode = 'fixed'">$ Fixed</button>
+              <button [class.active]="riskMode === 'pct'"   (click)="riskMode = 'pct';   requestMarginCalc()">% Balance</button>
+              <button [class.active]="riskMode === 'fixed'" (click)="riskMode = 'fixed'; requestMarginCalc()">$ Fixed</button>
             </div>
           </div>
           <div class="invest-input-row">
             <span class="invest-prefix">{{ riskMode === 'pct' ? '%' : '$' }}</span>
             <input type="number" class="modify-input"
               *ngIf="riskMode === 'pct'"
-              [(ngModel)]="riskPct" min="0.1" max="10" step="0.1" />
+              [(ngModel)]="riskPct" min="0.1" max="10" step="0.1" (ngModelChange)="requestMarginCalc()" />
             <input type="number" class="modify-input"
               *ngIf="riskMode === 'fixed'"
-              [(ngModel)]="riskFixed" min="1" step="1" />
+              [(ngModel)]="riskFixed" min="1" step="1" (ngModelChange)="requestMarginCalc()" />
             <span class="invest-derived" *ngIf="riskMode === 'pct' && accountBalance">= ${{ tradeRiskNzd }}</span>
           </div>
           <div class="over-limit-warn" *ngIf="overLimit">
@@ -84,6 +84,13 @@
           <div class="invest-input-row" style="margin-top:0">
             <span class="invest-prefix loss">-$</span>
             <input type="number" class="modify-input" [value]="tradeRiskNzd" disabled />
+          </div>
+        </div>
+        <div class="trade-field">
+          <label>Margin <span class="sub-label">(amount invested)</span></label>
+          <div class="invest-input-row" style="margin-top:0">
+            <span class="invest-prefix">$</span>
+            <input type="number" class="modify-input" [value]="marginNzd ?? ''" [placeholder]="marginNzd === null ? '...' : ''" disabled />
           </div>
         </div>
         <div class="trade-field">
@@ -106,12 +113,12 @@
           <div class="invest-mode-row">
             <label>SL from entry price</label>
             <div class="mode-toggle">
-              <button [class.active]="tradeSlMode === 'pct'"   (click)="tradeSlMode = 'pct'">%</button>
-              <button [class.active]="tradeSlMode === 'fixed'" (click)="tradeSlMode = 'fixed'">$ pts</button>
+              <button [class.active]="tradeSlMode === 'pct'"   (click)="tradeSlMode = 'pct';   requestMarginCalc()">%</button>
+              <button [class.active]="tradeSlMode === 'fixed'" (click)="tradeSlMode = 'fixed'; requestMarginCalc()">$ pts</button>
             </div>
           </div>
-          <input *ngIf="tradeSlMode === 'pct'"   type="number" class="modify-input" [(ngModel)]="tradeSl"      min="0.01"    step="0.1"  placeholder="e.g. 1" />
-          <input *ngIf="tradeSlMode === 'fixed'" type="number" class="modify-input" [(ngModel)]="tradeSlFixed" min="0.00001" step="1"    placeholder="e.g. 500" />
+          <input *ngIf="tradeSlMode === 'pct'"   type="number" class="modify-input" [(ngModel)]="tradeSl"      min="0.01"    step="0.1"  placeholder="e.g. 1"   (ngModelChange)="requestMarginCalc()" />
+          <input *ngIf="tradeSlMode === 'fixed'" type="number" class="modify-input" [(ngModel)]="tradeSlFixed" min="0.00001" step="1"    placeholder="e.g. 500" (ngModelChange)="requestMarginCalc()" />
         </div>
         <div class="rr-preview" *ngIf="tradeSl && tradeEffectiveTp">
           <span class="loss">-${{ tradeRiskNzd }}</span>

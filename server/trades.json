@@ -1,6 +1,25 @@
 {
   "open": [
     {
+      "id": 1788007608891,
+      "instrument": "BTCUSD",
+      "investmentSize": 0.16,
+      "riskPct": 3.83,
+      "riskNzd": 27.06,
+      "openDate": "2026.08.29 15:46:49",
+      "notes": "",
+      "source": "mt5",
+      "mt5Ticket": 119302270,
+      "positionId": 194887152,
+      "volume": 0.16,
+      "slPrice": 77676.5,
+      "price": 77576.5,
+      "tp": 77158.58,
+      "currency": "NZD"
+    }
+  ],
+  "closed": [
+    {
       "id": 1787998048789,
       "instrument": "BTCUSD",
       "investmentSize": 0.17,
@@ -15,10 +34,12 @@
       "slPrice": 77500.16,
       "price": 77549.5,
       "tp": 77750.79,
-      "currency": "NZD"
-    }
-  ],
-  "closed": [
+      "currency": "NZD",
+      "outcome": "loss",
+      "amount": 14.19,
+      "closeDate": "2026.08.29 15:32:40",
+      "closeNotes": ""
+    },
     {
       "id": 1787998031486,
       "instrument": "BTCUSD",

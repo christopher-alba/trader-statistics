@@ -131,6 +131,7 @@ void OnTimer()
       }
    }
 
+   PollMarginCalc();
    PollCloseCommands();
    PollModifyCommands();
 
@@ -519,6 +520,53 @@ void SendHistoricalIndicators(string symbol, ENUM_TIMEFRAMES tf, int count)
       }
    }
    Print("[TS] Sent ", copied, " historical indicator bars for ", symbol);
+}
+
+//+------------------------------------------------------------------+
+//| Poll margin calc requests from Angular                          |
+//+------------------------------------------------------------------+
+void PollMarginCalc()
+{
+   char post[], result[]; string rh;
+   int code = WebRequest("GET", ServerUrl + "/api/calc-margin/request",
+                         "Content-Type: application/json\r\n", 2000, post, result, rh);
+   if(code != 200 || ArraySize(result) == 0) return;
+   string json = CharArrayToString(result);
+   if(json == "{}" || StringLen(json) < 5) return;
+
+   string sym    = ParseJsonString(json, "symbol");
+   string dir    = ParseJsonString(json, "direction");
+   double riskNzd = ParseJsonDouble(json, "riskNzd");
+   double slPct   = ParseJsonDouble(json, "slPct");
+   double slFixed = ParseJsonDouble(json, "slFixed");
+   if(sym == "" || riskNzd <= 0 || (slPct <= 0 && slFixed <= 0)) return;
+
+   if(!SymbolSelect(sym, true)) return;
+   ENUM_ORDER_TYPE ot = (dir == "sell") ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+   double price = (ot == ORDER_TYPE_BUY) ? ask : bid;
+   if(price <= 0) return;
+
+   double tickSize  = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+   if(tickSize <= 0 || tickValue <= 0) return;
+
+   double slDist = (slFixed > 0) ? slFixed : price * slPct / 100.0;
+   double lots   = riskNzd / ((slDist / tickSize) * tickValue);
+
+   double lotStep = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+   double minLot  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+   lots = MathMax(minLot, MathMin(maxLot, MathFloor(lots / lotStep) * lotStep));
+
+   double margin = 0;
+   OrderCalcMargin(ot, sym, lots, price, margin);
+
+   string body = "{\"margin\":" + DoubleToString(margin, 2) + "}";
+   char bodyArr[]; StringToCharArray(body, bodyArr, 0, StringLen(body));
+   WebRequest("POST", ServerUrl + "/api/calc-margin/result",
+              "Content-Type: application/json\r\n", 2000, bodyArr, result, rh);
 }
 
 //+------------------------------------------------------------------+

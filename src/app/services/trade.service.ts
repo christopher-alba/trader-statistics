@@ -63,4 +63,12 @@ export class TradeService {
   placeCommand(payload: { symbol: string; direction: string; riskNzd: number; slPct: number; tpNzd?: number; tpPct?: number }): Observable<any> {
     return this.http.post(`${BASE}/commands`, payload);
   }
+
+  requestMarginCalc(symbol: string, direction: string, riskNzd: number, slPct: number, slFixed: number): Observable<void> {
+    return this.http.post<void>(`${BASE}/calc-margin/request`, { symbol, direction, riskNzd, slPct, slFixed });
+  }
+
+  getMarginCalcResult(): Observable<{ margin: number } | null> {
+    return this.http.get<{ margin: number } | null>(`${BASE}/calc-margin/result`);
+  }
 }

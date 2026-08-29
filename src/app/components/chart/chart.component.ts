@@ -71,6 +71,33 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   get maxRisk(): number    { return +(this.accountBalance * 0.1).toFixed(2); }
   get overLimit(): boolean { return this.accountBalance > 0 && this.tradeRiskNzd > this.maxRisk; }
 
+  currentAsk = 0;
+  marginNzd: number | null = null;
+  private marginCalcDebounce?: ReturnType<typeof setTimeout>;
+
+  requestMarginCalc(): void {
+    if (!this.activeSymbol || !this.tradeRiskNzd) { this.marginNzd = null; return; }
+    const slPct   = this.tradeSlMode === 'pct'   ? this.tradeSl      : 0;
+    const slFixed = this.tradeSlMode === 'fixed' ? this.tradeSlFixed : 0;
+    if (!slPct && !slFixed) { this.marginNzd = null; return; }
+    clearTimeout(this.marginCalcDebounce);
+    this.marginCalcDebounce = setTimeout(() => {
+      this.tradeService.requestMarginCalc(this.activeSymbol, this.tradeDirection, this.tradeRiskNzd, slPct, slFixed)
+        .subscribe({ next: () => this.pollMarginResult(), error: () => {} });
+    }, 400);
+  }
+
+  private pollMarginResult(attempts = 0): void {
+    if (attempts > 15) return;
+    this.tradeService.getMarginCalcResult().subscribe({
+      next: r => {
+        if (r?.margin != null) { this.marginNzd = r.margin; this.cdr.detectChanges(); }
+        else setTimeout(() => this.pollMarginResult(attempts + 1), 200);
+      },
+      error: () => {},
+    });
+  }
+
   // Close state per ticket
   closingTickets = new Set<number>();
 
@@ -124,10 +151,9 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Auto-populate symbol from the live price stream
     this.subs.add(this.ws.price$.subscribe(p => {
-      if (!this.symbol) {
-        this.symbol = p.symbol;
-        this.cdr.detectChanges();
-      }
+      if (!this.symbol) this.symbol = p.symbol;
+      if (p.symbol === this.activeSymbol) this.currentAsk = p.ask;
+      this.cdr.detectChanges();
     }));
 
     // Live bar updates — secsLeft driven purely by MT5
@@ -292,6 +318,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!sym) return;
     this.loadError = '';
     this.activeSymbol = sym;
+    this.marginNzd = null;
     this.clearCountdownPriceLine();
     this.secsLeft = null;
 
@@ -308,6 +335,8 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
           this.updateCountdownPriceLine(this.lastClose, this.secsLeft);
           this.cdr.detectChanges();
         }
+
+        this.requestMarginCalc();
 
         // Restore saved range or fit content
         const savedRange = localStorage.getItem('chart_range');
