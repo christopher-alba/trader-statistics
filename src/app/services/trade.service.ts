@@ -44,7 +44,7 @@ export class TradeService {
     return this.http.get<any>(`${BASE}/price/${encodeURIComponent(symbol.toUpperCase())}`);
   }
 
-  getBars(symbol: string): Observable<{ timeframe: number; bars: any[] }> {
+  getBars(symbol: string): Observable<{ timeframe: number; bars: any[]; secsLeft: number | null }> {
     return this.http.get<any>(`${BASE}/bars/${encodeURIComponent(symbol.toUpperCase())}`);
   }
 

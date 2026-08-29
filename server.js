@@ -319,7 +319,7 @@ app.post('/api/indicators/history', (req, res) => {
 });
 
 // --- Candlestick bars + live positions ---
-const barsStore = {}; // { BTCUSD: { timeframe, bars: [] } }
+const barsStore = {}; // { BTCUSD: { timeframe, bars: [], secsLeft } }
 let lastPositions = [];
 
 app.post('/api/bars', (req, res) => {
@@ -338,11 +338,11 @@ app.post('/api/bars', (req, res) => {
 app.get('/api/bars/:symbol', (req, res) => {
   const data = barsStore[req.params.symbol.toUpperCase()];
   if (!data) return res.status(404).json({ error: 'No bars for ' + req.params.symbol });
-  res.json(data);
+  res.json({ ...data, secsLeft: data.secsLeft ?? null });
 });
 
 app.post('/api/bar/update', (req, res) => {
-  const { symbol, bar } = req.body;
+  const { symbol, bar, secsLeft } = req.body;
   if (!symbol || !bar) return res.status(400).json({ error: 'invalid' });
   const sym = symbol.toUpperCase();
   if (barsStore[sym]) {
@@ -354,8 +354,9 @@ app.post('/api/bar/update', (req, res) => {
       bars.push(bar);
       if (bars.length > 3500) bars.shift();
     }
+    if (secsLeft !== undefined) barsStore[sym].secsLeft = secsLeft;
   }
-  const msg = JSON.stringify({ type: 'bar_update', data: { symbol: sym, bar } });
+  const msg = JSON.stringify({ type: 'bar_update', data: { symbol: sym, bar, secsLeft: secsLeft ?? null } });
   wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
   res.json({ ok: true });
 });

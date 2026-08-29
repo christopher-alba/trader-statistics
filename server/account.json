@@ -1,9 +1,9 @@
 {
-  "balance": 842.63,
-  "equity": 843.54,
-  "margin": 118.18,
-  "freeMargin": 725.36,
-  "marginLevel": 713.78,
+  "balance": 720.97,
+  "equity": 725.28,
+  "margin": 222.99,
+  "freeMargin": 502.29,
+  "marginLevel": 325.25,
   "currency": "NZD",
-  "updatedAt": "2026-08-29T09:03:48.892Z"
+  "updatedAt": "2026-08-29T12:12:43.795Z"
 }

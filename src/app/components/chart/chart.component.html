@@ -4,6 +4,7 @@
       <h2 class="page-title">Live Chart</h2>
       <span *ngIf="activeSymbol" class="symbol-badge">{{ activeSymbol }}</span>
       <span *ngIf="timeframeLabel" class="tf-badge">{{ timeframeLabel }}</span>
+      <span *ngIf="secsLeftLabel" class="candle-countdown">{{ secsLeftLabel }}</span>
     </div>
     <div class="toolbar-right">
       <div class="indicator-picker-wrap">
@@ -86,10 +87,19 @@
           </div>
         </div>
         <div class="trade-field">
-          <label>TP $ gained</label>
+          <div class="invest-mode-row">
+            <label>TP $ gained</label>
+            <label class="rr-auto-label">
+              <input type="checkbox" [(ngModel)]="tradeAutoRR" /> 1:
+              <input *ngIf="tradeAutoRR" type="number" class="modify-input rr-mult-input"
+                [(ngModel)]="tradeRRMultiplier" min="0.1" step="0.1" />
+              <span *ngIf="!tradeAutoRR" style="color:#475569">auto</span>
+            </label>
+          </div>
           <div class="invest-input-row" style="margin-top:0">
             <span class="invest-prefix win">+$</span>
-            <input type="number" class="modify-input" [(ngModel)]="tradeTpNzd" min="0.01" step="1" />
+            <input type="number" class="modify-input" [value]="tradeEffectiveTp" [disabled]="tradeAutoRR"
+              (input)="tradeTpNzd = +$any($event.target).value" min="0.01" step="1" />
           </div>
         </div>
         <div class="trade-field">
@@ -103,10 +113,10 @@
           <input *ngIf="tradeSlMode === 'pct'"   type="number" class="modify-input" [(ngModel)]="tradeSl"      min="0.01"    step="0.1"  placeholder="e.g. 1" />
           <input *ngIf="tradeSlMode === 'fixed'" type="number" class="modify-input" [(ngModel)]="tradeSlFixed" min="0.00001" step="1"    placeholder="e.g. 500" />
         </div>
-        <div class="rr-preview" *ngIf="tradeSl && tradeTpNzd">
+        <div class="rr-preview" *ngIf="tradeSl && tradeEffectiveTp">
           <span class="loss">-${{ tradeRiskNzd }}</span>
           <span class="rr-sep">→</span>
-          <span class="win">+${{ tradeTpNzd }}</span>
+          <span class="win">+${{ tradeEffectiveTp }}</span>
           <span class="rr-label">(1:{{ tradeRR }})</span>
         </div>
         <div class="error-msg" *ngIf="tradeError">{{ tradeError }}</div>

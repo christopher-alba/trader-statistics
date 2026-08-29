@@ -30,6 +30,14 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   positions: Position[] = [];
   loadError = '';
   timeframeLabel = '';
+  secsLeft: number | null = null;
+
+  get secsLeftLabel(): string {
+    if (this.secsLeft === null) return '';
+    return `${this.secsLeft}s`;
+  }
+
+  private lastClose = 0;
   modifyForms: Record<number, { slNzd: number; tpNzd: number; saving: boolean; saved: boolean }> = {};
 
   // Open trade form
@@ -46,14 +54,20 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   tradeError = '';
   accountBalance = 0;
 
-  tradeTpNzd = 80;  // desired TP profit in NZD
+  tradeTpNzd = 80;  // desired TP profit in NZD (used when autoRR is off)
+  tradeAutoRR = true;
+  tradeRRMultiplier = 4;
+
+  get tradeEffectiveTp(): number {
+    return this.tradeAutoRR ? +(this.tradeRiskNzd * this.tradeRRMultiplier).toFixed(2) : this.tradeTpNzd;
+  }
 
   get tradeRiskNzd(): number {
     return this.riskMode === 'pct'
       ? +(this.accountBalance * this.riskPct / 100).toFixed(2)
       : this.riskFixed;
   }
-  get tradeRR(): string { return this.tradeRiskNzd ? (this.tradeTpNzd / this.tradeRiskNzd).toFixed(2) : '—'; }
+  get tradeRR(): string { return this.tradeRiskNzd ? (this.tradeEffectiveTp / this.tradeRiskNzd).toFixed(2) : '—'; }
   get maxRisk(): number    { return +(this.accountBalance * 0.1).toFixed(2); }
   get overLimit(): boolean { return this.accountBalance > 0 && this.tradeRiskNzd > this.maxRisk; }
 
@@ -63,6 +77,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   private chart: IChartApi | null = null;
   private candleSeries: ISeriesApi<'Candlestick', any> | null = null;
   private priceLines: Map<string, any> = new Map();
+  private countdownPriceLine: any = null;
   private resizeObserver: ResizeObserver | null = null;
   private subs = new Subscription();
 
@@ -115,14 +130,17 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }));
 
-    // Live bar updates — run outside Angular so canvas updates never trigger change detection
-    this.ngZone.runOutsideAngular(() => {
-      this.subs.add(this.ws.barUpdate$.subscribe(data => {
-        if (data.symbol === this.activeSymbol) {
-          this.candleSeries?.update(data.bar as any);
-        }
-      }));
-    });
+    // Live bar updates — secsLeft driven purely by MT5
+    this.subs.add(this.ws.barUpdate$.subscribe(data => {
+      if (data.symbol !== this.activeSymbol) return;
+      this.lastClose = data.bar.close;
+      if (data.secsLeft !== null) this.secsLeft = data.secsLeft;
+      this.ngZone.runOutsideAngular(() => {
+        this.candleSeries?.update(data.bar as any);
+        this.updateCountdownPriceLine(this.lastClose, this.secsLeft);
+      });
+      this.cdr.detectChanges();
+    }));
 
     // Live position updates — only re-render price lines when SL/TP changes; update profit in-place
     this.subs.add(this.ws.positions$.subscribe(positions => {
@@ -201,6 +219,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
+    this.clearCountdownPriceLine();
     this.resizeObserver?.disconnect();
     this.chart?.remove();
     clearInterval(this.tradeCooldownInterval);
@@ -273,11 +292,22 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!sym) return;
     this.loadError = '';
     this.activeSymbol = sym;
+    this.clearCountdownPriceLine();
+    this.secsLeft = null;
 
     this.tradeService.getBars(sym).subscribe({
       next: data => {
         this.candleSeries?.setData(data.bars as any);
         this.timeframeLabel = this.formatTimeframe(data.timeframe);
+        const bars = data.bars as any[];
+        if (bars.length) {
+          this.lastClose = (bars[bars.length - 1] as any).close;
+        }
+        if (data.secsLeft != null) {
+          this.secsLeft = Math.min(60, Math.max(0, data.secsLeft));
+          this.updateCountdownPriceLine(this.lastClose, this.secsLeft);
+          this.cdr.detectChanges();
+        }
 
         // Restore saved range or fit content
         const savedRange = localStorage.getItem('chart_range');
@@ -401,6 +431,31 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  private updateCountdownPriceLine(close: number, secsLeft: number | null): void {
+    if (!this.candleSeries) return;
+    this.clearCountdownPriceLine();
+    if (secsLeft === null) return;
+    const label = `${secsLeft}s`;
+    this.countdownPriceLine = this.candleSeries.createPriceLine({
+      price: close,
+      color: '#f59e0b',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      axisLabelColor: '#f59e0b',
+      axisLabelTextColor: '#000000',
+      title: label,
+    });
+  }
+
+  private clearCountdownPriceLine(): void {
+    if (this.countdownPriceLine && this.candleSeries) {
+      try { this.candleSeries.removePriceLine(this.countdownPriceLine); } catch {}
+      this.countdownPriceLine = null;
+    }
+  }
+
+
   private formatTimeframe(seconds: number): string {
     if (seconds < 60) return `${seconds}s`;
     if (seconds < 3600) return `M${seconds / 60}`;
@@ -423,7 +478,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       symbol:    this.activeSymbol,
       direction: this.tradeDirection,
       riskNzd:   this.tradeRiskNzd,
-      tpNzd:     this.tradeTpNzd,
+      tpNzd:     this.tradeEffectiveTp,
     };
     if (this.tradeSlMode === 'pct') payload.slPct   = this.tradeSl;
     else                            payload.slFixed = this.tradeSlFixed;

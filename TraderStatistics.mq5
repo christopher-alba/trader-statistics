@@ -17,21 +17,21 @@
 //--- Inputs
 input string ServerUrl    = "http://127.0.0.1:3000"; // Backend URL
 input int    MagicNumber  = 0;                        // 0 = all trades
-input int    PollMs       = 50;                      // Command poll interval (ms)
+input int    PollMs       = 200;                      // Command poll interval (ms)
 
 //--- State
 double   g_LastPostedAsk     = -1;
 datetime g_LastFailedPost    = 0;    // throttle retries when server is down
 int      g_FailBackoffSec    = 30;   // seconds between retries after a failure
 string   g_ChartSymbol       = "";   // symbol bars were last sent for
-datetime g_LastBarTick       = 0;    // rate-limit bar updates to once per second
 uint     g_LastTickMs        = 0;    // millisecond timestamp of last OnTick post
 uint     g_LastAccountMs    = 0;    // millisecond timestamp of last account post
 uint     g_LastIndicatorMs  = 0;    // millisecond timestamp of last indicator post
+uint     g_LastBarMs        = 0;    // millisecond timestamp of last bar update post
 bool     g_IndicatorHistorySent = false; // send full history once handles are warm
-input int TickIntervalMs    = 50;   // min ms between tick-driven updates
-input int AccountIntervalMs = 500;  // min ms between account posts
-input int IndicatorIntervalMs = 500; // min ms between indicator posts
+input int TickIntervalMs      = 500;   // min ms between tick-driven updates
+input int AccountIntervalMs   = 500;   // min ms between account posts
+input int IndicatorIntervalMs = 500;   // min ms between indicator posts
 
 // Indicator handles
 int g_AO_Handle   = INVALID_HANDLE;
@@ -104,13 +104,6 @@ void OnTick()
       PostIndicators();
    }
 
-   // Update the forming candle at most once per second
-   datetime nowSec = TimeCurrent();
-   if(nowSec != g_LastBarTick)
-   {
-      g_LastBarTick = nowSec;
-      PostCurrentBar();
-   }
 }
 
 //+------------------------------------------------------------------+
@@ -118,6 +111,15 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // Bar update on a reliable timer — not tick-dependent
+   uint now = GetTickCount();
+   if(now - g_LastBarMs >= (uint)TickIntervalMs)
+   {
+      g_LastBarMs = now;
+      PostCurrentBar();
+   }
+
+
    // Send full indicator history once — wait until handles have calculated enough bars
    if(!g_IndicatorHistorySent && g_AO_Handle != INVALID_HANDLE)
    {
@@ -745,7 +747,12 @@ void PostCurrentBar()
    ArraySetAsSeries(rates, false);
    if(CopyRates(Symbol(), PERIOD_CURRENT, 0, 1, rates) < 1) return;
 
+   long secsLeft = (long)(rates[0].time + PeriodSeconds(PERIOD_CURRENT)) - (long)TimeCurrent();
+   if(secsLeft < 0) secsLeft = 0;
+   if(secsLeft > 60) secsLeft = 60;
+
    string json = "{\"symbol\":\"" + Symbol() + "\","
+               + "\"secsLeft\":" + IntegerToString(secsLeft) + ","
                + "\"bar\":{"
                + "\"time\":"  + IntegerToString((long)rates[0].time) + ","
                + "\"open\":"  + DoubleToString(rates[0].open,  8) + ","

@@ -46,6 +46,17 @@
   border: 1px solid var(--border);
 }
 
+.candle-countdown {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #000;
+  background: #f59e0b;
+  border: 1px solid #d97706;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
 .symbol-input-group {
   display: flex;
   gap: 0.5rem;
@@ -344,6 +355,21 @@
 }
 
 .error-msg { font-size: 0.75rem; color: var(--loss); }
+
+.rr-auto-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  color: #64748b;
+  cursor: pointer;
+  input[type=checkbox] { cursor: pointer; }
+}
+
+.rr-mult-input {
+  width: 42px !important;
+  padding: 0.1rem 0.25rem !important;
+}
 
 .btn-place {
   width: 100%;

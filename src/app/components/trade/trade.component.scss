@@ -151,6 +151,33 @@
   .accent { color: var(--accent); }
 }
 
+.rr-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  margin-bottom: 14px;
+
+  label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; white-space: nowrap; }
+
+  .invest-input-row {
+    input {
+      flex: none;
+      width: 60px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      &:focus { border-color: var(--accent); }
+    }
+  }
+}
+
 .error-msg {
   color: var(--loss);
   font-size: 12px;

@@ -36,6 +36,8 @@ export class TradeComponent implements OnInit, OnDestroy {
   slPct     = 1;    // SL distance as % of entry price
   slFixed   = 0;    // SL distance as fixed price units
   tpNzdInput = 80;  // desired TP profit in NZD
+  autoRR    = true; // auto-set TP = risk × rrMultiplier
+  rrMultiplier = 4;
   balance = 0;
 
   // Pending commands from backend
@@ -101,13 +103,16 @@ export class TradeComponent implements OnInit, OnDestroy {
       ? +(this.balance * this.riskPct / 100).toFixed(2)
       : this.riskFixed;
   }
+  get effectiveTp(): number {
+    return this.autoRR ? +(this.riskNzd * this.rrMultiplier).toFixed(2) : this.tpNzdInput;
+  }
   get maxRisk(): number    { return +(this.balance * 0.1).toFixed(2); }
   get overLimit(): boolean { return this.balance > 0 && this.riskNzd > this.maxRisk; }
   get slNzd(): number      { return this.riskNzd; }
-  get tpNzd(): number      { return this.tpNzdInput; }
+  get tpNzd(): number      { return this.effectiveTp; }
   get rrRatio(): string | null {
-    if (!this.riskNzd || !this.tpNzdInput) return null;
-    return (this.tpNzdInput / this.riskNzd).toFixed(2);
+    if (!this.riskNzd || !this.effectiveTp) return null;
+    return (this.effectiveTp / this.riskNzd).toFixed(2);
   }
 
   saveBalance() {
@@ -129,7 +134,7 @@ export class TradeComponent implements OnInit, OnDestroy {
       symbol:    this.symbol.trim().toUpperCase(),
       direction: this.direction,
       riskNzd:   this.riskNzd,
-      tpNzd:     this.tpNzdInput,
+      tpNzd:     this.effectiveTp,
     };
     if (this.slMode === 'pct') payload.slPct   = this.slPct;
     else                       payload.slFixed = this.slFixed;

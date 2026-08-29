@@ -30,6 +30,7 @@ export interface BarData {
 export interface BarUpdate {
   symbol: string;
   bar: BarData;
+  secsLeft: number | null;
 }
 
 export interface IndicatorUpdate {
