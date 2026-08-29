@@ -1,0 +1,92 @@
+<div class="journal">
+  <div class="journal-header">
+    <h2 class="page-title">Trade Journal</h2>
+    <div class="journal-controls">
+      <input
+        type="text"
+        [(ngModel)]="searchText"
+        placeholder="Search instrument or notes..."
+        class="input search-input"
+      />
+      <select [(ngModel)]="outcomeFilter" class="input select-input">
+        <option value="all">All Trades</option>
+        <option value="open">Open Only</option>
+        <option value="win">Wins Only</option>
+        <option value="loss">Losses Only</option>
+      </select>
+      <select [(ngModel)]="sortBy" class="input select-input">
+        <option value="date-desc">Newest First</option>
+        <option value="date-asc">Oldest First</option>
+        <option value="pnl">Best P&amp;L</option>
+        <option value="risk">Highest Risk</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="empty-state" *ngIf="!filteredTrades.length">
+    No trades match your filters.
+  </div>
+
+  <div class="cards-grid">
+    <div
+      class="note-card"
+      [class]="cardClass(trade)"
+      *ngFor="let trade of filteredTrades"
+    >
+      <div class="card-header">
+        <span class="card-instrument">
+          {{ trade.instrument }}
+          <span class="badge badge-mt5" *ngIf="trade.source === 'mt5'">MT5</span>
+        </span>
+        <span *ngIf="!trade.isClosed" class="badge badge-open">OPEN</span>
+        <span *ngIf="trade.isClosed && asClosed(trade).outcome === 'win'" class="badge badge-win">WIN</span>
+        <span *ngIf="trade.isClosed && asClosed(trade).outcome === 'loss'" class="badge badge-loss">LOSS</span>
+      </div>
+
+      <div class="card-dates">
+        <span>Opened: {{ formatDate(trade.openDate) }}</span>
+        <span *ngIf="trade.isClosed">Closed: {{ formatDate(asClosed(trade).closeDate) }}</span>
+      </div>
+
+      <div class="stats-strip">
+        <div class="stat-item" *ngIf="trade.source === 'mt5'">
+          <span class="stat-name">Volume</span>
+          <span class="stat-val">{{ trade.volume || trade.investmentSize }} lots</span>
+        </div>
+        <div class="stat-item" *ngIf="trade.source !== 'mt5'">
+          <span class="stat-name">Invested</span>
+          <span class="stat-val">{{ formatCurrency(trade.investmentSize || 0) }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-name">Risk %</span>
+          <span class="stat-val">{{ trade.riskPct | number:'1.2-2' }}%</span>
+        </div>
+        <div class="stat-item" *ngIf="trade.source === 'mt5' && trade.slPrice">
+          <span class="stat-name">SL</span>
+          <span class="stat-val">{{ trade.slPrice | number:'1.2-2' }}</span>
+        </div>
+        <div class="stat-item" *ngIf="trade.source !== 'mt5'">
+          <span class="stat-name">Risk (NZD)</span>
+          <span class="stat-val">{{ formatCurrency(trade.riskNzd) }}</span>
+        </div>
+        <div class="stat-item" *ngIf="trade.isClosed">
+          <span class="stat-name">P&amp;L</span>
+          <span class="stat-val" [class.win]="pnl(trade) >= 0" [class.loss]="pnl(trade) < 0">
+            {{ pnl(trade) >= 0 ? '+' : '' }}{{ formatCurrency(pnl(trade)) }}
+          </span>
+        </div>
+        <div class="stat-item" *ngIf="trade.isClosed">
+          <span class="stat-name">R:R</span>
+          <span class="stat-val">{{ rr(trade) }}</span>
+        </div>
+      </div>
+
+      <div class="card-notes" *ngIf="trade.notes">
+        <span class="notes-label">Entry:</span> {{ trade.notes }}
+      </div>
+      <div class="card-notes exit-notes" *ngIf="trade.isClosed && asClosed(trade).closeNotes">
+        <span class="notes-label">Exit:</span> {{ asClosed(trade).closeNotes }}
+      </div>
+    </div>
+  </div>
+</div>

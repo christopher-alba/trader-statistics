@@ -1,0 +1,150 @@
+<div class="trade-page">
+
+  <div class="trade-layout">
+
+    <!-- ── Place Trade Form ── -->
+    <div class="card form-card">
+      <div class="card-title">Place Trade via MT5</div>
+      <p class="card-subtitle">Command is queued and executed by the EA on the next poll (~1 second).</p>
+
+      <div class="form-group">
+        <label>Symbol</label>
+        <input type="text" [(ngModel)]="symbol" placeholder="e.g. BTCUSD, EURUSD" (input)="symbol = symbol.toUpperCase()" />
+      </div>
+
+      <div class="form-group">
+        <label>Direction</label>
+        <div class="dir-group">
+          <button class="dir-btn dir-buy" [class.active]="direction === 'buy'" (click)="setDirection('buy')">▲ Buy</button>
+          <button class="dir-btn dir-sell" [class.active]="direction === 'sell'" (click)="setDirection('sell')">▼ Sell</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Risk $NZD <span class="sub-label">(amount lost if SL hit)</span></label>
+        <div class="invest-mode-toggle">
+          <button [class.active]="riskMode === 'pct'"   (click)="riskMode = 'pct'">% of Balance</button>
+          <button [class.active]="riskMode === 'fixed'" (click)="riskMode = 'fixed'">Fixed $NZD</button>
+        </div>
+        <div class="invest-input-row">
+          <ng-container *ngIf="riskMode === 'pct'">
+            <input type="number" [(ngModel)]="riskPct" min="0.1" max="10" step="0.1" placeholder="e.g. 2" />
+            <span class="invest-hint" *ngIf="balance">= ${{ riskNzd }} NZD</span>
+          </ng-container>
+          <ng-container *ngIf="riskMode === 'fixed'">
+            <input type="number" [(ngModel)]="riskFixed" min="1" step="1" placeholder="e.g. 20" />
+          </ng-container>
+        </div>
+        <div class="over-limit-warn" *ngIf="overLimit">
+          ⚠ Exceeds 10% of balance — max ${{ maxRisk }} NZD
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>SL $ <span class="sub-label">lost if hit</span></label>
+          <input type="number" [value]="slNzd" disabled placeholder="—" />
+        </div>
+        <div class="form-group">
+          <label>TP $ <span class="sub-label">gained if hit</span></label>
+          <input type="number" [(ngModel)]="tpNzdInput" min="0.01" step="1" placeholder="e.g. 80" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>SL distance from entry price</label>
+        <div class="invest-mode-toggle">
+          <button [class.active]="slMode === 'pct'"   (click)="slMode = 'pct'">% of Price</button>
+          <button [class.active]="slMode === 'fixed'" (click)="slMode = 'fixed'">Fixed $ pts</button>
+        </div>
+        <div class="invest-input-row">
+          <ng-container *ngIf="slMode === 'pct'">
+            <input type="number" [(ngModel)]="slPct" min="0.01" step="0.1" placeholder="e.g. 1" />
+            <span class="invest-hint">% below/above entry</span>
+          </ng-container>
+          <ng-container *ngIf="slMode === 'fixed'">
+            <input type="number" [(ngModel)]="slFixed" min="0.00001" step="1" placeholder="e.g. 500" />
+            <span class="invest-hint">price units</span>
+          </ng-container>
+        </div>
+      </div>
+
+      <!-- Balance for $ previews (optional) -->
+      <div class="form-group">
+        <label>Account Balance NZD <span class="sub-label">(for $ preview only)</span></label>
+        <input type="number" [(ngModel)]="balance" min="0" step="100" placeholder="e.g. 10000" (input)="saveBalance()" />
+      </div>
+
+      <!-- Preview -->
+      <div class="preview-box" *ngIf="symbol && slPct && tpNzdInput">
+        <div class="preview-row">
+          <span class="pr-label">{{ direction === 'buy' ? '▲ BUY' : '▼ SELL' }}</span>
+          <span class="pr-val instrument">{{ symbol }}</span>
+        </div>
+        <div class="preview-row">
+          <span class="pr-label">SL</span>
+          <span class="pr-val loss">
+            {{ slMode === 'pct' ? slPct + '% from entry' : slFixed + ' pts from entry' }} = -${{ slNzd }} NZD
+          </span>
+        </div>
+        <div class="preview-row">
+          <span class="pr-label">TP</span>
+          <span class="pr-val win">+${{ tpNzdInput }} NZD if hit</span>
+        </div>
+        <div class="preview-row" *ngIf="rrRatio">
+          <span class="pr-label">R:R</span>
+          <span class="pr-val accent">1 : {{ rrRatio }}</span>
+        </div>
+      </div>
+
+      <div class="error-msg" *ngIf="error">{{ error }}</div>
+
+      <button class="place-btn" [class.buy]="direction === 'buy'" [class.sell]="direction === 'sell'"
+        [disabled]="placing || cooldown > 0 || !symbol.trim()" (click)="placeTrade()">
+        {{ placing ? 'Queueing…' : cooldown > 0 ? 'Wait ' + cooldown + 's…' : (direction === 'buy' ? '▲ Place Buy' : '▼ Place Sell') }}
+      </button>
+    </div>
+
+    <!-- ── Pending Commands ── -->
+    <div class="card pending-card">
+      <div class="card-title-row">
+        <div class="card-title">Pending Commands
+          <span class="badge" *ngIf="pendingCommands.length">{{ pendingCommands.length }}</span>
+        </div>
+        <button class="cancel-all-btn" *ngIf="pendingCommands.length" (click)="cancelAll()">Cancel All</button>
+      </div>
+
+      <div class="empty-state" *ngIf="!pendingCommands.length">
+        No pending commands. Trades placed here will appear until the EA executes them.
+      </div>
+
+      <div class="command-list">
+        <div class="command-row" *ngFor="let cmd of pendingCommands"
+          [class.buy]="cmd.direction === 'buy'" [class.sell]="cmd.direction === 'sell'">
+
+          <div class="cmd-main">
+            <span class="cmd-dir" [class.buy]="cmd.direction === 'buy'" [class.sell]="cmd.direction === 'sell'">
+              {{ cmd.direction === 'buy' ? '▲ BUY' : '▼ SELL' }}
+            </span>
+            <span class="cmd-symbol">{{ cmd.symbol }}</span>
+            <span class="cmd-pending-badge">PENDING</span>
+          </div>
+
+          <div class="cmd-details">
+            <span>Risk ${{ cmd.riskNzd }} NZD</span>
+            <span>SL {{ cmd.slPct }}%</span>
+            <span>TP {{ cmd.tpPct }}%</span>
+            <span class="cmd-age">{{ ageLabel(cmd.createdAt) }}</span>
+          </div>
+
+          <button class="cancel-btn" (click)="cancelCommand(cmd.id)" title="Cancel">✕</button>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <strong>How it works:</strong> The MT5 EA polls this list every second. When it picks up a command, it calculates lot size from your risk $NZD and SL %, places a market order, then removes the command from this list.
+      </div>
+    </div>
+
+  </div>
+</div>

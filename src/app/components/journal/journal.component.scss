@@ -1,0 +1,134 @@
+.journal {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.journal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.page-title {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.4rem;
+}
+
+.journal-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  min-width: 220px;
+}
+
+.select-input {
+  min-width: 140px;
+}
+
+.empty-state {
+  color: #64748b;
+  text-align: center;
+  padding: 3rem;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.25rem;
+}
+
+.note-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-left: 4px solid var(--border);
+  transition: border-color 0.2s;
+
+  &--win  { border-left-color: var(--win); }
+  &--loss { border-left-color: var(--loss); }
+  &--open { border-left-color: var(--open); }
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-instrument {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.card-dates {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.stats-strip {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.stat-name {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-val {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e2e8f0;
+
+  &.win  { color: var(--win); }
+  &.loss { color: var(--loss); }
+}
+
+.card-notes {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.exit-notes {
+  color: #64748b;
+  font-style: italic;
+}
+
+.notes-label {
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  margin-right: 0.25rem;
+}

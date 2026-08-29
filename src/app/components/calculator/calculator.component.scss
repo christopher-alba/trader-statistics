@@ -1,0 +1,127 @@
+.calculator {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-title {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.4rem;
+}
+
+.calc-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.results-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.result-main {
+  text-align: center;
+  padding: 2.5rem 2rem;
+}
+
+.result-label {
+  font-size: 0.8rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+}
+
+.result-units {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.result-sub {
+  font-size: 0.9rem;
+  color: #64748b;
+  margin-top: 0.4rem;
+}
+
+.result-breakdown {
+  padding: 1.25rem;
+}
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: #94a3b8;
+
+  &:last-child { border-bottom: none; }
+}
+
+.breakdown-val {
+  font-weight: 700;
+  color: #e2e8f0;
+
+  &.loss { color: var(--loss); }
+}
+
+.formula-panel {
+  pre.formula {
+    margin: 0;
+    font-family: 'Courier New', monospace;
+    font-size: 0.82rem;
+    color: #64748b;
+    line-height: 1.8;
+    white-space: pre-wrap;
+
+    strong { color: var(--accent); font-size: 1rem; }
+  }
+}
+
+.input-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.range-input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.range-val {
+  min-width: 50px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.badge-live {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #22c55e;
+  margin-left: 0.5rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.field-error {
+  font-size: 0.75rem;
+  color: var(--loss);
+  margin-top: 0.25rem;
+  display: block;
+}

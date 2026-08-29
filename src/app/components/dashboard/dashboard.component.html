@@ -1,0 +1,221 @@
+<div class="dashboard">
+  <!-- Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat-card">
+      <span class="stat-label">Open Trades</span>
+      <span class="stat-value open">{{ openTrades.length }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Closed Trades</span>
+      <span class="stat-value">{{ closedTrades.length }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Win Rate</span>
+      <span class="stat-value win">{{ winRate }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Net P&amp;L (NZD)</span>
+      <span class="stat-value" [class.win]="netPnL >= 0" [class.loss]="netPnL < 0">
+        {{ formatCurrency(netPnL) }}
+      </span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Avg Win</span>
+      <span class="stat-value win">{{ formatCurrency(avgWin) }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Avg Loss</span>
+      <span class="stat-value loss">{{ formatCurrency(avgLoss) }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Avg Risk %</span>
+      <span class="stat-value">{{ avgRiskPct | number:'1.2-2' }}%</span>
+    </div>
+  </div>
+
+  <!-- Main columns -->
+  <div class="main-cols">
+    <!-- Left: Open Trade Form -->
+    <div class="panel form-panel">
+      <h2 class="panel-title">Open Trade</h2>
+      <form (ngSubmit)="submitOpenTrade()" class="trade-form">
+        <div class="form-group">
+          <label>Open Date</label>
+          <input type="text" [value]="form.openDate" readonly class="input readonly" />
+        </div>
+        <div class="form-group">
+          <label>Instrument *</label>
+          <input type="text" [(ngModel)]="form.instrument" name="instrument"
+            placeholder="e.g. EURUSD" class="input" required />
+        </div>
+        <div class="form-group">
+          <label>Investment Size (NZD)</label>
+          <input type="number" [(ngModel)]="form.investmentSize" name="investmentSize"
+            placeholder="0.00" class="input" />
+        </div>
+        <div class="form-group">
+          <label>Risk % *</label>
+          <input type="number" [(ngModel)]="form.riskPct" name="riskPct"
+            placeholder="1.00" step="0.01" class="input" required />
+        </div>
+        <div class="form-group">
+          <label>Stop Loss (NZD)</label>
+          <input type="number" [(ngModel)]="form.riskNzd" name="riskNzd"
+            placeholder="0.00" class="input" />
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea [(ngModel)]="form.notes" name="notes" placeholder="Trade notes..."
+            class="input textarea"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Open Trade</button>
+      </form>
+    </div>
+
+    <!-- Right: Open Trades List -->
+    <div class="panel trades-panel">
+      <h2 class="panel-title">Open Positions</h2>
+      <div class="empty-state" *ngIf="!openTrades.length">
+        No open trades. Use the form to open one.
+      </div>
+      <div class="trade-list">
+        <div class="trade-row" *ngFor="let trade of openTrades">
+          <div class="trade-row-header">
+            <span class="instrument">
+              {{ trade.instrument }}
+              <span class="badge badge-mt5" *ngIf="trade.source === 'mt5'">MT5</span>
+              <span class="badge badge-open">OPEN</span>
+            </span>
+            <div class="trade-actions">
+              <button class="btn btn-warning btn-sm" (click)="openCloseModal(trade)">Close</button>
+              <button class="btn btn-danger btn-sm" (click)="deleteTrade(trade.id)">✕</button>
+            </div>
+          </div>
+          <div class="trade-stats">
+            <span *ngIf="trade.source === 'mt5'">Vol: <strong>{{ trade.volume || trade.investmentSize }} lots</strong></span>
+            <span *ngIf="trade.source !== 'mt5'">Invested: <strong>{{ formatCurrency(trade.investmentSize || 0) }}</strong></span>
+            <span>Risk: <strong>{{ trade.riskPct | number:'1.2-2' }}%</strong></span>
+            <span *ngIf="trade.source === 'mt5' && trade.slPrice">SL: <strong>{{ trade.slPrice | number:'1.2-2' }}</strong></span>
+            <span *ngIf="trade.source !== 'mt5'">Risk $: <strong>{{ formatCurrency(trade.riskNzd) }}</strong></span>
+          </div>
+          <div class="trade-date">{{ formatDate(trade.openDate) }}</div>
+          <div class="trade-notes" *ngIf="trade.notes">{{ trade.notes }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="charts-row">
+    <div class="panel chart-panel">
+      <h3 class="panel-title">Cumulative P&amp;L</h3>
+      <div class="chart-container">
+        <canvas #pnlChart></canvas>
+      </div>
+    </div>
+    <div class="panel chart-panel chart-panel--small">
+      <h3 class="panel-title">Win / Loss</h3>
+      <div class="chart-container">
+        <canvas #donutChart></canvas>
+      </div>
+    </div>
+    <div class="panel chart-panel">
+      <h3 class="panel-title">Risk % per Trade</h3>
+      <div class="chart-container">
+        <canvas #riskChart></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trade History Table -->
+  <div class="panel history-panel">
+    <h2 class="panel-title">Trade History</h2>
+    <div class="empty-state" *ngIf="!closedTrades.length">No closed trades yet.</div>
+    <div class="table-wrapper" *ngIf="closedTrades.length">
+      <table class="trade-table">
+        <thead>
+          <tr>
+            <th>Instrument</th>
+            <th>Opened</th>
+            <th>Closed</th>
+            <th>Vol / Invested</th>
+            <th>Risk %</th>
+            <th>SL / Risk $</th>
+            <th>Outcome</th>
+            <th>P&amp;L</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let trade of closedTrades"
+            [class.win-row]="trade.outcome === 'win'"
+            [class.loss-row]="trade.outcome === 'loss'">
+            <td>
+              {{ trade.instrument }}
+              <span class="badge badge-mt5" *ngIf="trade.source === 'mt5'">MT5</span>
+            </td>
+            <td>{{ formatDate(trade.openDate) }}</td>
+            <td>{{ formatDate(trade.closeDate) }}</td>
+            <td>
+              <ng-container *ngIf="trade.source === 'mt5'">{{ trade.volume || trade.investmentSize }} lots</ng-container>
+              <ng-container *ngIf="trade.source !== 'mt5'">{{ formatCurrency(trade.investmentSize || 0) }}</ng-container>
+            </td>
+            <td>{{ trade.riskPct | number:'1.2-2' }}%</td>
+            <td>
+              <ng-container *ngIf="trade.source === 'mt5' && trade.slPrice">{{ trade.slPrice | number:'1.2-2' }}</ng-container>
+              <ng-container *ngIf="trade.source !== 'mt5'">{{ formatCurrency(trade.riskNzd) }}</ng-container>
+            </td>
+            <td>
+              <span class="badge" [class.badge-win]="trade.outcome === 'win'"
+                [class.badge-loss]="trade.outcome === 'loss'">
+                {{ trade.outcome | uppercase }}
+              </span>
+            </td>
+            <td [class.win]="trade.outcome === 'win'" [class.loss]="trade.outcome === 'loss'">
+              {{ trade.outcome === 'win' ? '+' : '-' }}{{ formatCurrency(trade.amount) }}
+            </td>
+            <td class="notes-cell">{{ trade.notes }}</td>
+            <td>
+              <button class="btn btn-danger btn-sm" (click)="deleteTrade(trade.id)">✕</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Close Trade Modal -->
+<div class="modal-overlay" *ngIf="showCloseModal" (click)="cancelClose()">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <h2 class="modal-title">Close Trade — {{ closingTrade?.instrument }}</h2>
+    <form (ngSubmit)="submitClose()">
+      <div class="form-group">
+        <label>Outcome *</label>
+        <select [(ngModel)]="closeForm.outcome" name="outcome" class="input">
+          <option value="win">Win</option>
+          <option value="loss">Loss</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Amount (NZD) *</label>
+        <input type="number" [(ngModel)]="closeForm.amount" name="amount"
+          placeholder="Amount won/lost" class="input" required />
+      </div>
+      <div class="form-group">
+        <label>Close Date</label>
+        <input type="text" [value]="closeForm.closeDate" readonly class="input readonly" />
+      </div>
+      <div class="form-group">
+        <label>Close Notes</label>
+        <textarea [(ngModel)]="closeForm.closeNotes" name="closeNotes"
+          placeholder="Exit notes..." class="input textarea"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" (click)="cancelClose()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Confirm Close</button>
+      </div>
+    </form>
+  </div>
+</div>

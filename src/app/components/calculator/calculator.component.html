@@ -1,0 +1,108 @@
+<div class="calculator">
+  <h2 class="page-title">Position Size Calculator</h2>
+
+  <div class="calc-layout">
+    <!-- Inputs -->
+    <div class="panel inputs-panel">
+      <h3 class="panel-title">Inputs</h3>
+      <div class="form-group">
+        <label>Instrument</label>
+        <input type="text" [(ngModel)]="instrument" name="instrument"
+          placeholder="e.g. BTCUSD" class="input"
+          (ngModelChange)="onInstrumentChange()" />
+      </div>
+      <div class="form-group">
+        <label>
+          Account Balance (NZD)
+          <span *ngIf="balanceFromMt5" class="badge-live">● LIVE</span>
+        </label>
+        <input type="number" [(ngModel)]="balance" name="balance"
+          (ngModelChange)="onBalanceChange()" class="input" />
+      </div>
+      <div class="form-group">
+        <label>Risk %</label>
+        <div class="input-row">
+          <input type="range" [(ngModel)]="riskPct" name="riskPct"
+            min="0.1" max="10" step="0.1" class="range-input"
+            (ngModelChange)="onRiskChange()" />
+          <span class="range-val">{{ riskPct | number:'1.1-2' }}%</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>
+          Current Price (ask)
+          <span *ngIf="priceFromMt5" class="badge-live">● LIVE</span>
+        </label>
+        <div class="input-row">
+          <input type="number" [(ngModel)]="currentPrice" name="currentPrice"
+            (ngModelChange)="onPriceChange()" class="input" step="any" />
+          <button type="button" class="btn btn-secondary btn-sm" (click)="fetchPrice()" [disabled]="!instrument">
+            Fetch
+          </button>
+        </div>
+        <span *ngIf="priceFetchError" class="field-error">{{ priceFetchError }}</span>
+      </div>
+      <div class="form-group">
+        <label>Leverage (default 500)</label>
+        <input type="number" [(ngModel)]="leverage" name="leverage"
+          (ngModelChange)="onLeverageChange()" class="input" />
+      </div>
+      <div class="form-group">
+        <label>NZDUSD Rate</label>
+        <input type="number" [(ngModel)]="nzdusd" name="nzdusd"
+          (ngModelChange)="onNzdusdChange()" class="input" step="0.0001" />
+      </div>
+
+      <button class="btn btn-primary btn-full" (click)="copyToOpenTrade()">
+        Copy to Open Trade Form →
+      </button>
+    </div>
+
+    <!-- Results -->
+    <div class="results-panel">
+      <div class="panel result-main">
+        <div class="result-label">Position Size</div>
+        <div class="result-units">{{ formattedUnits }}</div>
+        <div class="result-sub">units</div>
+      </div>
+
+      <div class="panel result-breakdown">
+        <h3 class="panel-title">Breakdown</h3>
+        <div class="breakdown-row">
+          <span>Risk Amount (NZD)</span>
+          <span class="breakdown-val loss">
+            {{ riskNzd | currency:'NZD':'symbol':'1.2-2' }}
+          </span>
+        </div>
+        <div class="breakdown-row">
+          <span>Price per Unit (NZD)</span>
+          <span class="breakdown-val">
+            {{ pricePerUnitNzd | currency:'NZD':'symbol':'1.4-6' }}
+          </span>
+        </div>
+        <div class="breakdown-row">
+          <span>Notional Position (NZD)</span>
+          <span class="breakdown-val">
+            {{ positionValueNzd | currency:'NZD':'symbol':'1.2-2' }}
+          </span>
+        </div>
+        <div class="breakdown-row">
+          <span>Leverage Used</span>
+          <span class="breakdown-val">{{ leverage }}×</span>
+        </div>
+      </div>
+
+      <div class="panel formula-panel">
+        <h3 class="panel-title">Formula</h3>
+        <pre class="formula">
+units = (balance × risk% × leverage)
+        ÷ (price ÷ nzdusd)
+
+     = ({{ balance }} × {{ riskPct / 100 }} × {{ leverage }})
+       ÷ ({{ currentPrice }} ÷ {{ nzdusd }})
+
+     ≈ <strong>{{ formattedUnits }}</strong></pre>
+      </div>
+    </div>
+  </div>
+</div>

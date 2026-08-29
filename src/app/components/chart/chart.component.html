@@ -1,0 +1,147 @@
+<div class="chart-page">
+  <div class="chart-toolbar">
+    <div class="toolbar-left">
+      <h2 class="page-title">Live Chart</h2>
+      <span *ngIf="activeSymbol" class="symbol-badge">{{ activeSymbol }}</span>
+      <span *ngIf="timeframeLabel" class="tf-badge">{{ timeframeLabel }}</span>
+    </div>
+    <div class="toolbar-right">
+      <div class="symbol-input-group">
+        <input
+          type="text"
+          [(ngModel)]="symbol"
+          placeholder="e.g. BTCUSD"
+          class="input symbol-input"
+          (keydown.enter)="loadBars()"
+        />
+        <button class="btn btn-primary" (click)="loadBars()">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-error" *ngIf="loadError">{{ loadError }}</div>
+
+  <div class="chart-body">
+    <div #chartContainer class="chart-container"></div>
+
+    <!-- Positions panel -->
+    <div class="positions-panel">
+
+      <!-- Open trade form -->
+      <div class="open-trade-section">
+        <div class="panel-section-title">Open Trade</div>
+        <div class="dir-row">
+          <button class="dir-btn buy" [class.active]="tradeDirection === 'buy'" (click)="tradeDirection = 'buy'">▲ Buy</button>
+          <button class="dir-btn sell" [class.active]="tradeDirection === 'sell'" (click)="tradeDirection = 'sell'">▼ Sell</button>
+        </div>
+        <div class="trade-field">
+          <div class="invest-mode-row">
+            <label>Risk $NZD if SL hit</label>
+            <div class="mode-toggle">
+              <button [class.active]="riskMode === 'pct'"   (click)="riskMode = 'pct'">% Balance</button>
+              <button [class.active]="riskMode === 'fixed'" (click)="riskMode = 'fixed'">$ Fixed</button>
+            </div>
+          </div>
+          <div class="invest-input-row">
+            <span class="invest-prefix">{{ riskMode === 'pct' ? '%' : '$' }}</span>
+            <input type="number" class="modify-input"
+              *ngIf="riskMode === 'pct'"
+              [(ngModel)]="riskPct" min="0.1" max="10" step="0.1" />
+            <input type="number" class="modify-input"
+              *ngIf="riskMode === 'fixed'"
+              [(ngModel)]="riskFixed" min="1" step="1" />
+            <span class="invest-derived" *ngIf="riskMode === 'pct' && accountBalance">= ${{ tradeRiskNzd }}</span>
+          </div>
+          <div class="over-limit-warn" *ngIf="overLimit">
+            ⚠ Max ${{ maxRisk }} (10% of balance)
+          </div>
+        </div>
+        <div class="trade-field">
+          <label>SL $ lost</label>
+          <div class="invest-input-row" style="margin-top:0">
+            <span class="invest-prefix loss">-$</span>
+            <input type="number" class="modify-input" [value]="tradeRiskNzd" disabled />
+          </div>
+        </div>
+        <div class="trade-field">
+          <label>TP $ gained</label>
+          <div class="invest-input-row" style="margin-top:0">
+            <span class="invest-prefix win">+$</span>
+            <input type="number" class="modify-input" [(ngModel)]="tradeTpNzd" min="0.01" step="1" />
+          </div>
+        </div>
+        <div class="trade-field">
+          <div class="invest-mode-row">
+            <label>SL from entry price</label>
+            <div class="mode-toggle">
+              <button [class.active]="tradeSlMode === 'pct'"   (click)="tradeSlMode = 'pct'">%</button>
+              <button [class.active]="tradeSlMode === 'fixed'" (click)="tradeSlMode = 'fixed'">$ pts</button>
+            </div>
+          </div>
+          <input *ngIf="tradeSlMode === 'pct'"   type="number" class="modify-input" [(ngModel)]="tradeSl"      min="0.01"    step="0.1"  placeholder="e.g. 1" />
+          <input *ngIf="tradeSlMode === 'fixed'" type="number" class="modify-input" [(ngModel)]="tradeSlFixed" min="0.00001" step="1"    placeholder="e.g. 500" />
+        </div>
+        <div class="rr-preview" *ngIf="tradeSl && tradeTpNzd">
+          <span class="loss">-${{ tradeRiskNzd }}</span>
+          <span class="rr-sep">→</span>
+          <span class="win">+${{ tradeTpNzd }}</span>
+          <span class="rr-label">(1:{{ tradeRR }})</span>
+        </div>
+        <div class="error-msg" *ngIf="tradeError">{{ tradeError }}</div>
+        <button class="btn-place" [class.buy]="tradeDirection === 'buy'" [class.sell]="tradeDirection === 'sell'"
+          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol">
+          {{ tradePlacing ? 'Queueing…' : tradeCooldown > 0 ? 'Wait ' + tradeCooldown + 's…' : (tradeDirection === 'buy' ? '▲ Buy ' : '▼ Sell ') + activeSymbol }}
+        </button>
+      </div>
+
+      <div class="panel-divider"></div>
+      <div class="panel-section-title">Open Positions</div>
+      <div class="positions-empty" *ngIf="!positionsForSymbol.length">
+        No open positions{{ activeSymbol ? ' for ' + activeSymbol : '' }}
+      </div>
+      <div class="position-card" *ngFor="let pos of positionsForSymbol; trackBy: trackByTicket">
+        <div class="pos-header">
+          <span class="pos-ticket">#{{ pos.ticket }}</span>
+          <span class="pos-type" [class.buy]="pos.type === 'buy'" [class.sell]="pos.type === 'sell'">
+            {{ pos.type | uppercase }}
+          </span>
+          <span class="pos-pnl" [class.win]="pos.profit >= 0" [class.loss]="pos.profit < 0">
+            {{ pos.profit >= 0 ? '+' : '' }}{{ pos.profit | number:'1.2-2' }}
+          </span>
+          <button class="btn-close-pos" (click)="closePosition(pos.ticket)"
+            [disabled]="closingTickets.has(pos.ticket)">
+            {{ closingTickets.has(pos.ticket) ? '…' : '✕' }}
+          </button>
+        </div>
+
+        <div class="pos-entry">Entry: {{ pos.price | number:'1.2-8' }}</div>
+
+        <ng-container *ngIf="modifyForms[pos.ticket]">
+          <div class="modify-row">
+            <span class="sl-dot">●</span>
+            <label>SL</label>
+            <span class="currency-prefix loss">-$</span>
+            <input type="number" class="modify-input"
+              [(ngModel)]="modifyForms[pos.ticket].slNzd"
+              min="0" step="0.01" placeholder="0.00" />
+          </div>
+          <div class="modify-row">
+            <span class="tp-dot">●</span>
+            <label>TP</label>
+            <span class="currency-prefix win">+$</span>
+            <input type="number" class="modify-input"
+              [(ngModel)]="modifyForms[pos.ticket].tpNzd"
+              min="0" step="0.01" placeholder="0.00" />
+          </div>
+          <button class="btn-modify"
+            (click)="modifyPosition(pos.ticket)"
+            [disabled]="modifyForms[pos.ticket].saving">
+            <span *ngIf="modifyForms[pos.ticket].saving">Sending…</span>
+            <span *ngIf="modifyForms[pos.ticket].saved">Sent ✓</span>
+            <span *ngIf="!modifyForms[pos.ticket].saving && !modifyForms[pos.ticket].saved">Update SL/TP</span>
+          </button>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+</div>

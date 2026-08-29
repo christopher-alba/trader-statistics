@@ -1,0 +1,182 @@
+/* Global styles - Trader Statistics dark theme */
+
+:root {
+  --bg: #0d0f14;
+  --surface: #161b25;
+  --surface2: #1e2535;
+  --border: #2a3347;
+  --accent: #3b82f6;
+  --win: #22c55e;
+  --loss: #ef4444;
+  --open: #f59e0b;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: #e2e8f0;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+// Panel / Card base
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.panel-title {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+// Forms
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+
+  label {
+    font-size: 0.8rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+}
+
+.input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+
+  &:focus {
+    border-color: var(--accent);
+  }
+
+  &.readonly {
+    color: #64748b;
+    cursor: default;
+  }
+
+  &::placeholder {
+    color: #475569;
+  }
+
+  option {
+    background: var(--surface2);
+  }
+}
+
+select.input {
+  cursor: pointer;
+}
+
+textarea.input {
+  resize: vertical;
+  min-height: 70px;
+}
+
+// Buttons
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.25rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &-primary {
+    background: var(--accent);
+    color: #fff;
+
+    &:hover { background: #2563eb; }
+  }
+
+  &-secondary {
+    background: var(--surface2);
+    color: #94a3b8;
+    border: 1px solid var(--border);
+
+    &:hover { color: #e2e8f0; border-color: #64748b; }
+  }
+
+  &-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--open);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+
+    &:hover { background: rgba(245, 158, 11, 0.25); }
+  }
+
+  &-danger {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--loss);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+
+    &:hover { background: rgba(239, 68, 68, 0.22); }
+  }
+
+  &-sm {
+    padding: 0.3rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  &-full {
+    width: 100%;
+  }
+}
+
+// Badges
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+
+  &-win  { background: rgba(34, 197, 94, 0.15); color: var(--win); }
+  &-loss { background: rgba(239, 68, 68, 0.15); color: var(--loss); }
+  &-open { background: rgba(245, 158, 11, 0.15); color: var(--open); }
+  &-mt5  { background: rgba(59, 130, 246, 0.15); color: var(--accent); }
+}
+
+// Utils
+.win  { color: var(--win) !important; }
+.loss { color: var(--loss) !important; }
+
+// Scrollbar
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3d4f6b; }

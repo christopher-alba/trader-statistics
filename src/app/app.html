@@ -1,0 +1,59 @@
+<div class="app-shell">
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">📈</span>
+        <span class="logo-text">Trader Statistics</span>
+      </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <nav class="tab-nav">
+      <a routerLink="/dashboard" routerLinkActive="active" class="tab-link">Dashboard</a>
+      <a routerLink="/journal" routerLinkActive="active" class="tab-link">Journal</a>
+      <a routerLink="/calculator" routerLinkActive="active" class="tab-link">Calculator</a>
+      <a routerLink="/chart" routerLinkActive="active" class="tab-link">Chart</a>
+      <a routerLink="/trade" routerLinkActive="active" class="tab-link tab-link--trade">▲▼ Place Trade</a>
+    </nav>
+
+    <!-- Account stats -->
+    <div class="account-balance" *ngIf="accountBalance !== null">
+      <div class="account-stat">
+        <span class="balance-label">Balance</span>
+        <span class="balance-value">{{ accountBalance | number:'1.2-2' }} {{ accountCurrency }}</span>
+      </div>
+      <div class="account-stat" *ngIf="accountEquity !== null">
+        <span class="balance-label">Equity</span>
+        <span class="balance-value" [class.equity-pos]="accountEquity >= accountBalance" [class.equity-neg]="accountEquity < accountBalance">
+          {{ accountEquity | number:'1.2-2' }} {{ accountCurrency }}
+        </span>
+      </div>
+      <div class="account-stat" *ngIf="accountMargin !== null && accountMargin > 0">
+        <span class="balance-label">Margin</span>
+        <span class="balance-value">{{ accountMargin | number:'1.2-2' }}</span>
+      </div>
+      <div class="account-stat" *ngIf="accountFreeMargin !== null && accountMargin !== null && accountMargin > 0">
+        <span class="balance-label">Free Margin</span>
+        <span class="balance-value">{{ accountFreeMargin | number:'1.2-2' }}</span>
+      </div>
+      <div class="account-stat" *ngIf="accountMarginLevel !== null && accountMarginLevel > 0">
+        <span class="balance-label">Margin Level</span>
+        <span class="balance-value" [class.equity-neg]="accountMarginLevel < 120">
+          {{ accountMarginLevel | number:'1.2-2' }}%
+        </span>
+      </div>
+    </div>
+
+    <!-- WS Status -->
+    <div class="ws-status">
+      <span class="ws-dot" [class.ws-dot--connected]="wsConnected" [class.ws-dot--disconnected]="!wsConnected"></span>
+      <span class="ws-label">{{ wsConnected ? 'Live' : 'Offline' }}</span>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="app-main">
+    <router-outlet />
+  </main>
+</div>
