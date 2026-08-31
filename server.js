@@ -410,9 +410,15 @@ app.get('/api/positions', (req, res) => {
 const livePrices = {}; // { BTCUSD: { bid, ask, updatedAt } }
 
 app.post('/api/price', (req, res) => {
-  const { symbol, bid, ask } = req.body;
+  const { symbol, bid, ask, nzdusdBid, nzdusdAsk } = req.body;
   if (!symbol) return res.status(400).json({ error: 'symbol required' });
-  const entry = { bid: parseFloat(bid), ask: parseFloat(ask), updatedAt: new Date().toISOString() };
+  const entry = {
+    bid: parseFloat(bid),
+    ask: parseFloat(ask),
+    updatedAt: new Date().toISOString(),
+    ...(nzdusdBid ? { nzdusdBid: parseFloat(nzdusdBid) } : {}),
+    ...(nzdusdAsk ? { nzdusdAsk: parseFloat(nzdusdAsk) } : {}),
+  };
   livePrices[symbol.toUpperCase()] = entry;
   const msg = JSON.stringify({ type: 'price', data: { symbol: symbol.toUpperCase(), ...entry } });
   wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });

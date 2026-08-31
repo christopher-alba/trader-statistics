@@ -17,6 +17,8 @@ export interface PriceData {
   bid: number;
   ask: number;
   updatedAt: string;
+  nzdusdBid?: number;
+  nzdusdAsk?: number;
 }
 
 export interface BarData {

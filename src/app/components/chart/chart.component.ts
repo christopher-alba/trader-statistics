@@ -31,6 +31,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   loadError = '';
   timeframeLabel = '';
   secsLeft: number | null = null;
+  private nzdusd = 0.6;
 
   get secsLeftLabel(): string {
     if (this.secsLeft === null) return '';
@@ -38,6 +39,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private lastClose = 0;
+  private lastOpen = 0;
   modifyForms: Record<number, { slNzd: number; tpNzd: number; saving: boolean; saved: boolean }> = {};
 
   // Open trade form
@@ -53,6 +55,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   tradeCooldown = 0;
   tradeError = '';
   accountBalance = 0;
+  freeMargin = 0;
 
   tradeTpNzd = 80;  // desired TP profit in NZD (used when autoRR is off)
   tradeAutoRR = true;
@@ -70,6 +73,12 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   get tradeRR(): string { return this.tradeRiskNzd ? (this.tradeEffectiveTp / this.tradeRiskNzd).toFixed(2) : '—'; }
   get maxRisk(): number    { return +(this.accountBalance * 0.1).toFixed(2); }
   get overLimit(): boolean { return this.accountBalance > 0 && this.tradeRiskNzd > this.maxRisk; }
+  get marginInsufficient(): boolean {
+    return this.freeMargin > 0 && this.marginNzd !== null && this.marginNzd > this.freeMargin;
+  }
+  lineMarginInsufficient(d: (typeof this.drawnLines)[0]): boolean {
+    return this.freeMargin > 0 && d.marginNzd !== null && d.marginNzd > this.freeMargin;
+  }
 
   currentAsk = 0;
   marginNzd: number | null = null;
@@ -100,6 +109,113 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Close state per ticket
   closingTickets = new Set<number>();
+
+  // ── Drawing ───────────────────────────────────────────────────────
+  drawMode = false;
+  pendingDrawPrice: number | null = null;
+  drawLabel = '';
+  drawColor = '#facc15';
+  readonly DRAW_COLORS = [
+    { value: '#facc15', label: 'Yellow' },
+    { value: '#f87171', label: 'Red'    },
+    { value: '#4ade80', label: 'Green'  },
+    { value: '#60a5fa', label: 'Blue'   },
+    { value: '#c084fc', label: 'Purple' },
+    { value: '#ffffff', label: 'White'  },
+  ];
+  drawnLines: {
+    id: string; label: string; price: number; color: string; line: any;
+    // order config — persisted
+    orderDirection: 'buy' | 'sell';
+    orderRiskMode: 'pct' | 'fixed';
+    orderRiskPct: number;
+    orderRiskNzd: number;
+    orderSlMode: 'pct' | 'fixed';
+    orderSlPct: number;
+    orderSlFixed: number;
+    orderAutoRR: boolean;
+    orderRRMultiplier: number;
+    orderTpNzd: number;
+    // order config — persisted
+    orderArmed: boolean;
+    // ui state — not persisted
+    showOrder: boolean;
+    orderStatus: 'idle' | 'sending' | 'sent' | 'error';
+    marginNzd: number | null;
+  }[] = [];
+
+  lineRiskNzd(d: (typeof this.drawnLines)[0]): number {
+    return d.orderRiskMode === 'pct'
+      ? +(this.accountBalance * d.orderRiskPct / 100).toFixed(2)
+      : d.orderRiskNzd;
+  }
+  lineEffectiveTp(d: (typeof this.drawnLines)[0]): number {
+    return d.orderAutoRR ? +(this.lineRiskNzd(d) * d.orderRRMultiplier).toFixed(2) : d.orderTpNzd;
+  }
+  lineRR(d: (typeof this.drawnLines)[0]): string {
+    const r = this.lineRiskNzd(d);
+    return r ? (this.lineEffectiveTp(d) / r).toFixed(2) : '—';
+  }
+  lineOverLimit(d: (typeof this.drawnLines)[0]): boolean {
+    return this.accountBalance > 0 && this.lineRiskNzd(d) > this.maxRisk;
+  }
+
+  toggleLineArmed(d: (typeof this.drawnLines)[0]): void {
+    d.orderArmed = !d.orderArmed;
+    // Reset prev prices so the first tick doesn't false-fire
+    this.prevAsk = 0;
+    this.prevBid = 0;
+    this.saveDrawnLines();
+    this.cdr.detectChanges();
+  }
+
+  private checkLineTriggers(ask: number, bid: number): void {
+    if (!this.prevAsk || !this.prevBid) return;
+    for (const d of this.drawnLines) {
+      if (!d.orderArmed || d.orderStatus !== 'idle') continue;
+      const price = d.orderDirection === 'buy' ? ask  : bid;
+      const prev  = d.orderDirection === 'buy' ? this.prevAsk : this.prevBid;
+      const crossed = (prev > d.price && price <= d.price) ||
+                      (prev < d.price && price >= d.price);
+      if (crossed) {
+        this.ngZone.run(() => this.executeLineOrder(d));
+      }
+    }
+  }
+
+  requestLineMarginCalc(d: (typeof this.drawnLines)[0]): void {
+    if (!this.activeSymbol) { d.marginNzd = null; return; }
+    const risk    = this.lineRiskNzd(d);
+    const slPct   = d.orderSlMode === 'pct'   ? d.orderSlPct   : 0;
+    const slFixed = d.orderSlMode === 'fixed' ? d.orderSlFixed : 0;
+    if (!risk || (!slPct && !slFixed)) { d.marginNzd = null; return; }
+    clearTimeout(this._lineMarginDebounces.get(d.id));
+    this._lineMarginDebounces.set(d.id, setTimeout(() => {
+      this.tradeService.requestMarginCalc(this.activeSymbol, d.orderDirection, risk, slPct, slFixed)
+        .subscribe({ next: () => this.pollLineMarginResult(d), error: () => {} });
+    }, 400));
+  }
+
+  private pollLineMarginResult(d: (typeof this.drawnLines)[0], attempts = 0): void {
+    if (attempts > 15) return;
+    this.tradeService.getMarginCalcResult().subscribe({
+      next: r => {
+        if (r?.margin != null) { d.marginNzd = r.margin; this.cdr.detectChanges(); }
+        else setTimeout(() => this.pollLineMarginResult(d, attempts + 1), 200);
+      },
+      error: () => {},
+    });
+  }
+
+  private dragging:
+    | { kind: 'drawn';    id: string }
+    | { kind: 'position'; ticket: number; type: 'sl' | 'tp' }
+    | null = null;
+  private _wasDragging = false;
+  private _chartCleanup: (() => void)[] = [];
+  private _lineMarginDebounces = new Map<string, ReturnType<typeof setTimeout>>();
+  private prevAsk = 0;
+  private prevBid = 0;
 
   private chart: IChartApi | null = null;
   private candleSeries: ISeriesApi<'Candlestick', any> | null = null;
@@ -142,17 +258,31 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnInit(): void {
     // Track account balance for invest cap
     this.subs.add(this.ws.account$.subscribe(a => {
-      if (a.balance) this.accountBalance = a.balance;
+      if (a.balance)     this.accountBalance = a.balance;
+      if (a.freeMargin)  this.freeMargin     = a.freeMargin;
     }));
     this.tradeService.getAccount().subscribe({
-      next: a => { if (a.balance) this.accountBalance = a.balance; },
+      next: a => {
+        if (a.balance)    this.accountBalance = a.balance;
+        if (a.freeMargin) this.freeMargin     = a.freeMargin;
+      },
       error: () => {},
     });
+
+    // Track NZDUSD rate for USD→NZD conversion
+    this.subs.add(this.ws.price$.subscribe(p => {
+      if (p.nzdusdBid && p.nzdusdBid > 0) this.nzdusd = p.nzdusdBid;
+    }));
 
     // Auto-populate symbol from the live price stream
     this.subs.add(this.ws.price$.subscribe(p => {
       if (!this.symbol) this.symbol = p.symbol;
-      if (p.symbol === this.activeSymbol) this.currentAsk = p.ask;
+      if (p.symbol === this.activeSymbol) {
+        this.currentAsk = p.ask;
+        this.checkLineTriggers(p.ask, p.bid);
+        this.prevAsk = p.ask;
+        this.prevBid = p.bid;
+      }
       this.cdr.detectChanges();
     }));
 
@@ -160,6 +290,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     this.subs.add(this.ws.barUpdate$.subscribe(data => {
       if (data.symbol !== this.activeSymbol) return;
       this.lastClose = data.bar.close;
+      this.lastOpen  = data.bar.open;
       if (data.secsLeft !== null) this.secsLeft = data.secsLeft;
       this.ngZone.runOutsideAngular(() => {
         this.candleSeries?.update(data.bar as any);
@@ -243,6 +374,274 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
+  private setupDragListeners(): void {
+    const el = this.chartContainer.nativeElement as HTMLElement;
+    const THRESHOLD = 6;
+
+    const lineYOf = (price: number) =>
+      this.candleSeries?.priceToCoordinate(price) ?? null;
+
+    const findDraggable = (y: number) => {
+      // Drawn lines
+      for (const d of this.drawnLines) {
+        const ly = lineYOf(d.price);
+        if (ly != null && Math.abs(y - ly) <= THRESHOLD)
+          return { kind: 'drawn' as const, id: d.id };
+      }
+      // SL / TP position lines
+      for (const pos of this.positions) {
+        if (pos.sl > 0) {
+          const ly = lineYOf(pos.sl);
+          if (ly != null && Math.abs(y - ly) <= THRESHOLD)
+            return { kind: 'position' as const, ticket: pos.ticket, type: 'sl' as const };
+        }
+        if (pos.tp > 0) {
+          const ly = lineYOf(pos.tp);
+          if (ly != null && Math.abs(y - ly) <= THRESHOLD)
+            return { kind: 'position' as const, ticket: pos.ticket, type: 'tp' as const };
+        }
+      }
+      return null;
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (!this.candleSeries) return;
+      const y = e.clientY - el.getBoundingClientRect().top;
+      const hit = findDraggable(y);
+      if (hit) {
+        this.dragging = hit;
+        e.preventDefault();
+        this.chart?.applyOptions({ handleScroll: { pressedMouseMove: false } });
+      }
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.candleSeries) return;
+      const y = e.clientY - el.getBoundingClientRect().top;
+
+      if (this.dragging) {
+        this._wasDragging = true;
+        const price = this.candleSeries.coordinateToPrice(y);
+        if (price == null) return;
+
+        if (this.dragging.kind === 'drawn') {
+          const d = this.drawnLines.find(l => l.id === (this.dragging as any).id);
+          if (!d) return;
+          d.price = +price.toFixed(2);
+          try { d.line.applyOptions({ price: d.price, title: `${d.label}  @ ${d.price}` }); } catch {}
+
+        } else {
+          const { ticket, type } = this.dragging as { kind: 'position'; ticket: number; type: 'sl' | 'tp' };
+          const pos = this.positions.find(p => p.ticket === ticket);
+          if (!pos) return;
+          const lineKey = `${type}-${ticket}`;
+          const line = this.priceLines.get(lineKey);
+          if (!line) return;
+          const rounded = +price.toFixed(pos.sl > 100 ? 2 : 5);
+          try { line.applyOptions({ price: rounded }); } catch {}
+          // Live-update the form NZD preview
+          if (type === 'sl') {
+            this.modifyForms[ticket].slNzd = this.priceToSlNzd(rounded, pos);
+          } else {
+            this.modifyForms[ticket].tpNzd = this.priceToTpNzd(rounded, pos);
+          }
+        }
+        this.ngZone.run(() => this.cdr.detectChanges());
+        return;
+      }
+
+      el.style.cursor = findDraggable(y) ? 'ns-resize' : '';
+    };
+
+    const onMouseUp = () => {
+      if (!this.dragging) return;
+
+      if (this.dragging.kind === 'drawn') {
+        const d = this.drawnLines.find(l => l.id === (this.dragging as any).id);
+        if (d) try { d.line.applyOptions({ title: d.label }); } catch {}
+        this.saveDrawnLines();
+      } else {
+        const { ticket } = this.dragging as { kind: 'position'; ticket: number; type: 'sl' | 'tp' };
+        this.modifyPosition(ticket);
+      }
+
+      this.dragging = null;
+      el.style.cursor = '';
+      this.chart?.applyOptions({ handleScroll: { pressedMouseMove: true } });
+    };
+
+    el.addEventListener('mousedown', onMouseDown);
+    el.addEventListener('mousemove', onMouseMove);
+    el.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mouseup', onMouseUp);
+
+    this._chartCleanup.push(
+      () => el.removeEventListener('mousedown', onMouseDown),
+      () => el.removeEventListener('mousemove', onMouseMove),
+      () => el.removeEventListener('mouseup', onMouseUp),
+      () => document.removeEventListener('mouseup', onMouseUp),
+    );
+  }
+
+  private priceToSlNzd(newSlPrice: number, pos: Position): number {
+    if (!pos.sl || !pos.slNzd || pos.sl === pos.price) return 0;
+    const ratio = Math.abs(pos.slNzd) / Math.abs(pos.price - pos.sl);
+    const magnitude = +(ratio * Math.abs(pos.price - newSlPrice)).toFixed(2);
+    const inProfit = pos.type === 'buy' ? newSlPrice > pos.price : newSlPrice < pos.price;
+    return inProfit ? magnitude : -magnitude;
+  }
+
+  private priceToTpNzd(newTpPrice: number, pos: Position): number {
+    if (!pos.tp || !pos.tpNzd || pos.tp === pos.price) return 0;
+    const ratio = pos.tpNzd / Math.abs(pos.tp - pos.price);
+    return +(ratio * Math.abs(newTpPrice - pos.price)).toFixed(2);
+  }
+
+  toggleDrawMode(): void {
+    this.drawMode = !this.drawMode;
+    this.pendingDrawPrice = null;
+  }
+
+  confirmDraw(): void {
+    if (this.pendingDrawPrice == null || !this.candleSeries) return;
+    const label = this.drawLabel.trim() || `${this.pendingDrawPrice}`;
+    const id = `draw-${Date.now()}`;
+    const line = this.candleSeries.createPriceLine({
+      price: this.pendingDrawPrice,
+      color: this.drawColor,
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      axisLabelVisible: true,
+      axisLabelColor: this.drawColor,
+      axisLabelTextColor: '#000000',
+      title: label,
+    });
+    const entry = {
+      id, label, price: this.pendingDrawPrice, color: this.drawColor, line,
+      orderDirection: this.tradeDirection,
+      orderRiskMode:  this.riskMode,
+      orderRiskPct:   this.riskPct,
+      orderRiskNzd:   this.riskFixed,
+      orderSlMode:    this.tradeSlMode,
+      orderSlPct:     this.tradeSl,
+      orderSlFixed:   this.tradeSlFixed,
+      orderAutoRR:    this.tradeAutoRR,
+      orderRRMultiplier: this.tradeRRMultiplier,
+      orderTpNzd:     this.tradeTpNzd,
+      orderArmed: false,
+      showOrder: false,
+      orderStatus: 'idle' as const,
+      marginNzd: null,
+    };
+    this.drawnLines.push(entry);
+    this.saveDrawnLines();
+    this.pendingDrawPrice = null;
+    this.cdr.detectChanges();
+  }
+
+  cancelDraw(): void {
+    this.pendingDrawPrice = null;
+  }
+
+  deleteDrawnLine(id: string): void {
+    const idx = this.drawnLines.findIndex(d => d.id === id);
+    if (idx === -1) return;
+    try { this.candleSeries?.removePriceLine(this.drawnLines[idx].line); } catch {}
+    this.drawnLines.splice(idx, 1);
+    this.saveDrawnLines();
+    this.cdr.detectChanges();
+  }
+
+  executeLineOrder(d: (typeof this.drawnLines)[0]): void {
+    if (!this.activeSymbol || d.orderStatus === 'sending') return;
+    d.orderStatus = 'sending';
+    const payload: any = {
+      symbol:    this.activeSymbol,
+      direction: d.orderDirection,
+      riskNzd:   this.lineRiskNzd(d),
+      tpNzd:     this.lineEffectiveTp(d),
+    };
+    if (d.orderSlMode === 'pct') payload.slPct   = d.orderSlPct;
+    else                          payload.slFixed = d.orderSlFixed;
+
+    this.tradeService.placeCommand(payload).subscribe({
+      next: () => {
+        // Command queued — wait for MT5 to confirm via a new position appearing
+        const knownTickets = new Set(this.positions.map(p => p.ticket));
+
+        const timeout = setTimeout(() => {
+          posSub.unsubscribe();
+          d.orderStatus = 'error';
+          this.cdr.detectChanges();
+        }, 15000);
+
+        const posSub = this.ws.positions$.subscribe(positions => {
+          const placed = positions.find(
+            p => p.symbol === this.activeSymbol && !knownTickets.has(p.ticket)
+          );
+          if (!placed) return;
+          clearTimeout(timeout);
+          posSub.unsubscribe();
+          d.orderStatus = 'sent';
+          this.cdr.detectChanges();
+          setTimeout(() => this.deleteDrawnLine(d.id), 1500);
+        });
+      },
+      error: () => { d.orderStatus = 'error'; this.cdr.detectChanges(); },
+    });
+  }
+
+  saveDrawnLines(): void {
+    const saved = this.drawnLines.map(({ id, label, price, color,
+      orderDirection, orderRiskMode, orderRiskPct, orderRiskNzd,
+      orderSlMode, orderSlPct, orderSlFixed,
+      orderAutoRR, orderRRMultiplier, orderTpNzd, orderArmed }) =>
+      ({ id, label, price, color,
+         orderDirection, orderRiskMode, orderRiskPct, orderRiskNzd,
+         orderSlMode, orderSlPct, orderSlFixed,
+         orderAutoRR, orderRRMultiplier, orderTpNzd, orderArmed }));
+    localStorage.setItem('chart_drawn_lines', JSON.stringify(saved));
+  }
+
+  private restoreDrawnLines(): void {
+    if (!this.candleSeries) return;
+    // Clear existing drawn lines before restoring (e.g. on symbol change)
+    this.drawnLines.forEach(d => { try { this.candleSeries!.removePriceLine(d.line); } catch {} });
+    this.drawnLines = [];
+    try {
+      const saved = JSON.parse(localStorage.getItem('chart_drawn_lines') || '[]');
+      for (const d of saved) {
+        const line = this.candleSeries.createPriceLine({
+          price: d.price,
+          color: d.color,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          axisLabelColor: d.color,
+          axisLabelTextColor: '#000000',
+          title: d.label,
+        });
+        this.drawnLines.push({
+          ...d, line,
+          orderDirection:    d.orderDirection    ?? 'buy',
+          orderRiskMode:     d.orderRiskMode     ?? 'pct',
+          orderRiskPct:      d.orderRiskPct      ?? 2,
+          orderRiskNzd:      d.orderRiskNzd      ?? 20,
+          orderSlMode:       d.orderSlMode       ?? 'pct',
+          orderSlPct:        d.orderSlPct        ?? 1,
+          orderSlFixed:      d.orderSlFixed      ?? 0,
+          orderAutoRR:       d.orderAutoRR       ?? true,
+          orderRRMultiplier: d.orderRRMultiplier ?? 4,
+          orderTpNzd:        d.orderTpNzd        ?? 80,
+          orderArmed: d.orderArmed ?? false,
+          showOrder: false,
+          orderStatus: 'idle',
+          marginNzd: null,
+        });
+      }
+    } catch {}
+  }
+
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     this.clearCountdownPriceLine();
@@ -251,6 +650,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     clearInterval(this.tradeCooldownInterval);
     this.indicatorPanes.forEach(p => { p.resizeObserver.disconnect(); p.chart.remove(); });
     this.indicatorPanes.clear();
+    this._chartCleanup.forEach(fn => fn());
   }
 
   private buildChart(): void {
@@ -285,6 +685,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       borderDownColor: '#ef4444',
       wickUpColor: '#22c55e',
       wickDownColor: '#ef4444',
+      lastValueVisible: false,
     });
 
     this.ngZone.runOutsideAngular(() => {
@@ -296,6 +697,21 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       });
       this.resizeObserver.observe(el);
     });
+
+    // Draw mode: click to capture price at cursor (suppressed if a drag just finished)
+    this.chart.subscribeClick((param) => {
+      if (this._wasDragging) { this._wasDragging = false; return; }
+      if (!this.drawMode || !param.point || !this.candleSeries) return;
+      const price = this.candleSeries.coordinateToPrice(param.point.y);
+      if (price == null) return;
+      this.ngZone.run(() => {
+        this.pendingDrawPrice = +price.toFixed(2);
+        this.drawLabel = '';
+        this.cdr.detectChanges();
+      });
+    });
+
+    this.setupDragListeners();
 
     // Main → all indicators: sync bar spacing (zoom) + scroll position separately
     // Avoids setVisibleRange clamping past the last data point
@@ -328,7 +744,9 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
         this.timeframeLabel = this.formatTimeframe(data.timeframe);
         const bars = data.bars as any[];
         if (bars.length) {
-          this.lastClose = (bars[bars.length - 1] as any).close;
+          const last = bars[bars.length - 1] as any;
+          this.lastClose = last.close;
+          this.lastOpen  = last.open;
         }
         if (data.secsLeft != null) {
           this.secsLeft = Math.min(60, Math.max(0, data.secsLeft));
@@ -347,6 +765,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
           this.chart?.timeScale().fitContent();
         }
 
+        this.restoreDrawnLines();
         this.loadIndicatorHistory(sym);
 
         // Restore indicators after bars + range are set so they sync correctly
@@ -381,7 +800,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       const existing = this.modifyForms[pos.ticket];
       if (!existing || (!existing.saving && !existing.saved)) {
         this.modifyForms[pos.ticket] = {
-          slNzd: pos.slNzd ? Math.abs(pos.slNzd) : 0,
+          slNzd: pos.slNzd ?? 0,
           tpNzd: pos.tpNzd || 0,
           saving: false,
           saved: false,
@@ -426,19 +845,24 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
         lineWidth: 2,
         lineStyle: LineStyle.Dotted,
         axisLabelVisible: true,
+        axisLabelColor: pos.type === 'buy' ? '#bfdbfe' : '#fde68a',
+        axisLabelTextColor: '#000000',
         title: `Entry #${pos.ticket}`,
       });
       this.priceLines.set(`entry-${pos.ticket}`, entry);
 
       // SL line — label shows NZD loss
       if (pos.sl > 0) {
-        const slLabel = pos.slNzd ? ` -$${Math.abs(pos.slNzd).toFixed(2)}` : '';
+        const slNzdConverted = pos.slNzd ? pos.slNzd / this.nzdusd : 0;
+        const slLabel = slNzdConverted ? ` ${slNzdConverted > 0 ? '+' : '-'}$${Math.abs(slNzdConverted).toFixed(2)}` : '';
         const sl = this.candleSeries!.createPriceLine({
           price: pos.sl,
           color: '#ef4444',
           lineWidth: 2,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: true,
+          axisLabelColor: '#fecaca',
+          axisLabelTextColor: '#000000',
           title: `SL${slLabel}`,
         });
         this.priceLines.set(`sl-${pos.ticket}`, sl);
@@ -446,13 +870,16 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
       // TP line — label shows NZD gain
       if (pos.tp > 0) {
-        const tpLabel = pos.tpNzd ? ` +$${pos.tpNzd.toFixed(2)}` : '';
+        const tpNzd = pos.tpNzd ? pos.tpNzd / this.nzdusd : 0;
+        const tpLabel = tpNzd ? ` +$${tpNzd.toFixed(2)}` : '';
         const tp = this.candleSeries!.createPriceLine({
           price: pos.tp,
           color: '#22c55e',
           lineWidth: 2,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: true,
+          axisLabelColor: '#bbf7d0',
+          axisLabelTextColor: '#000000',
           title: `TP${tpLabel}`,
         });
         this.priceLines.set(`tp-${pos.ticket}`, tp);
@@ -464,16 +891,16 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.candleSeries) return;
     this.clearCountdownPriceLine();
     if (secsLeft === null) return;
-    const label = `${secsLeft}s`;
+    const isUp = this.lastClose >= this.lastOpen;
     this.countdownPriceLine = this.candleSeries.createPriceLine({
       price: close,
-      color: '#f59e0b',
+      color: isUp ? '#22c55e' : '#ef4444',
       lineWidth: 1,
       lineStyle: LineStyle.Dotted,
       axisLabelVisible: true,
-      axisLabelColor: '#f59e0b',
+      axisLabelColor: isUp ? '#bbf7d0' : '#fecaca',
       axisLabelTextColor: '#000000',
-      title: label,
+      title: `${secsLeft}s`,
     });
   }
 

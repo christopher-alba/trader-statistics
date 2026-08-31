@@ -52,7 +52,7 @@
 // Charts
 .charts-row {
   display: grid;
-  grid-template-columns: 1fr 260px 1fr;
+  grid-template-columns: 260px 1fr;
   gap: 1.5rem;
 
   @media (max-width: 900px) {
@@ -64,6 +64,10 @@
   .chart-container {
     height: 220px;
     position: relative;
+  }
+
+  &--wide .chart-container {
+    height: 300px;
   }
 }
 

@@ -85,9 +85,13 @@ void OnTick()
    double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
    if(ask != g_LastPostedAsk && ask > 0)
    {
+      double nzdusdBid = SymbolInfoDouble("NZDUSD", SYMBOL_BID);
+      double nzdusdAsk = SymbolInfoDouble("NZDUSD", SYMBOL_ASK);
       string priceJson = "{\"symbol\":\"" + Symbol() + "\","
-                       + "\"bid\":"  + DoubleToString(bid, 8) + ","
-                       + "\"ask\":"  + DoubleToString(ask, 8) + "}";
+                       + "\"bid\":"     + DoubleToString(bid, 8) + ","
+                       + "\"ask\":"     + DoubleToString(ask, 8) + ","
+                       + "\"nzdusdBid\":" + DoubleToString(nzdusdBid, 8) + ","
+                       + "\"nzdusdAsk\":" + DoubleToString(nzdusdAsk, 8) + "}";
       if(PostRequest(ServerUrl + "/api/price", priceJson))
          g_LastPostedAsk = ask;
    }
@@ -708,18 +712,20 @@ bool ModifyPositionByNzd(ulong ticket, double slNzd, double tpNzd)
    }
 
    // Convert NZD amount → price distance → price level
-   double slDist = (slNzd > 0) ? slNzd * tickSize / (tickValue * volume) : 0;
+   // slNzd sign: negative = loss side, positive = profit side
+   double slDist = (slNzd != 0) ? MathAbs(slNzd) * tickSize / (tickValue * volume) : 0;
    double tpDist = (tpNzd > 0) ? tpNzd * tickSize / (tickValue * volume) : 0;
+   bool   slInProfit = (slNzd > 0);
 
    double sl = 0, tp = 0;
    if(posType == POSITION_TYPE_BUY)
    {
-      sl = (slDist > 0) ? NormalizeDouble(entry - slDist, digits) : 0;
+      sl = (slDist > 0) ? NormalizeDouble(slInProfit ? entry + slDist : entry - slDist, digits) : 0;
       tp = (tpDist > 0) ? NormalizeDouble(entry + tpDist, digits) : 0;
    }
    else
    {
-      sl = (slDist > 0) ? NormalizeDouble(entry + slDist, digits) : 0;
+      sl = (slDist > 0) ? NormalizeDouble(slInProfit ? entry - slDist : entry + slDist, digits) : 0;
       tp = (tpDist > 0) ? NormalizeDouble(entry - tpDist, digits) : 0;
    }
 
@@ -838,10 +844,14 @@ void SendOpenPositions()
       double tickSize  = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
       double tickValue = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
 
-      // NZD risk if SL is hit (always negative — it's a loss)
+      // NZD value if SL is hit: negative = loss, positive = profit
       double slNzd = 0;
       if(sl > 0 && tickSize > 0 && tickValue > 0)
-         slNzd = -(MathAbs(price - sl) / tickSize * tickValue * volume);
+      {
+         double slAmount = MathAbs(price - sl) / tickSize * tickValue * volume;
+         bool slInProfit = (type == POSITION_TYPE_BUY) ? sl > price : sl < price;
+         slNzd = slInProfit ? slAmount : -slAmount;
+      }
 
       // NZD reward if TP is hit (always positive — it's a gain)
       double tpNzd = 0;

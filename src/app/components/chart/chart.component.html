@@ -1,12 +1,15 @@
 <div class="chart-page">
   <div class="chart-toolbar">
     <div class="toolbar-left">
-      <h2 class="page-title">Live Chart</h2>
       <span *ngIf="activeSymbol" class="symbol-badge">{{ activeSymbol }}</span>
       <span *ngIf="timeframeLabel" class="tf-badge">{{ timeframeLabel }}</span>
       <span *ngIf="secsLeftLabel" class="candle-countdown">{{ secsLeftLabel }}</span>
-    </div>
-    <div class="toolbar-right">
+
+      <div class="toolbar-sep" *ngIf="activeSymbol"></div>
+
+      <button class="btn btn-secondary ind-btn" [class.draw-active]="drawMode" (click)="toggleDrawMode()">
+        ✏ {{ drawMode ? 'Drawing' : 'Draw' }}
+      </button>
       <div class="indicator-picker-wrap">
         <button class="btn btn-secondary ind-btn" (click)="showIndicatorPicker = !showIndicatorPicker">
           + Indicator
@@ -18,16 +21,17 @@
           </button>
         </div>
       </div>
-      <div class="symbol-input-group">
-        <input
-          type="text"
-          [(ngModel)]="symbol"
-          placeholder="e.g. BTCUSD"
-          class="input symbol-input"
-          (keydown.enter)="loadBars()"
-        />
-        <button class="btn btn-primary" (click)="loadBars()">Load</button>
-      </div>
+    </div>
+
+    <div class="symbol-input-group">
+      <input
+        type="text"
+        [(ngModel)]="symbol"
+        placeholder="Symbol…"
+        class="input symbol-input"
+        (keydown.enter)="loadBars()"
+      />
+      <button class="btn btn-primary" (click)="loadBars()">Load</button>
     </div>
   </div>
 
@@ -127,11 +131,152 @@
           <span class="rr-label">(1:{{ tradeRR }})</span>
         </div>
         <div class="error-msg" *ngIf="tradeError">{{ tradeError }}</div>
+        <div class="over-limit-warn" *ngIf="marginInsufficient">
+          ⚠ Need ${{ marginNzd }} margin — only ${{ freeMargin }} free
+        </div>
         <button class="btn-place" [class.buy]="tradeDirection === 'buy'" [class.sell]="tradeDirection === 'sell'"
-          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol">
+          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol || marginInsufficient">
           {{ tradePlacing ? 'Queueing…' : tradeCooldown > 0 ? 'Wait ' + tradeCooldown + 's…' : (tradeDirection === 'buy' ? '▲ Buy ' : '▼ Sell ') + activeSymbol }}
         </button>
       </div>
+
+      <!-- Pending draw form -->
+      <div class="draw-form" *ngIf="pendingDrawPrice !== null">
+        <div class="panel-section-title">New Line @ {{ pendingDrawPrice }}</div>
+        <input class="modify-input draw-label-input" type="text" [(ngModel)]="drawLabel" placeholder="Label (optional)" />
+        <div class="draw-color-row">
+          <span
+            *ngFor="let c of DRAW_COLORS"
+            class="draw-color-swatch"
+            [style.background]="c.value"
+            [class.selected]="drawColor === c.value"
+            (click)="drawColor = c.value"
+            [title]="c.label">
+          </span>
+        </div>
+        <div class="draw-btn-row">
+          <button class="btn btn-primary" (click)="confirmDraw()">Add</button>
+          <button class="btn btn-secondary" (click)="cancelDraw()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Drawn lines list -->
+      <ng-container *ngIf="drawnLines.length">
+        <div class="panel-divider"></div>
+        <div class="panel-section-title">Drawn Lines</div>
+        <div class="drawn-line-card" *ngFor="let d of drawnLines">
+
+          <!-- Header row -->
+          <div class="drawn-line-row">
+            <span class="drawn-line-dot" [style.background]="d.color"></span>
+            <span class="drawn-line-label">{{ d.label }}</span>
+            <span class="armed-badge" *ngIf="d.orderArmed">🎯</span>
+            <span class="drawn-line-price">{{ d.price }}</span>
+            <button class="btn-order-toggle" [class.active]="d.showOrder"
+              (click)="d.showOrder = !d.showOrder; saveDrawnLines()">⚡</button>
+            <button class="btn-close-pos" (click)="deleteDrawnLine(d.id)">✕</button>
+          </div>
+
+          <!-- Order form (same structure as Open Trade) -->
+          <div class="line-order-form" *ngIf="d.showOrder">
+            <div class="dir-row">
+              <button class="dir-btn buy"  [class.active]="d.orderDirection==='buy'"  (click)="d.orderDirection='buy'; requestLineMarginCalc(d)">▲ Buy</button>
+              <button class="dir-btn sell" [class.active]="d.orderDirection==='sell'" (click)="d.orderDirection='sell'; requestLineMarginCalc(d)">▼ Sell</button>
+            </div>
+            <div class="trade-field">
+              <div class="invest-mode-row">
+                <label>Risk $NZD if SL hit</label>
+                <div class="mode-toggle">
+                  <button [class.active]="d.orderRiskMode==='pct'"   (click)="d.orderRiskMode='pct';   requestLineMarginCalc(d)">% Balance</button>
+                  <button [class.active]="d.orderRiskMode==='fixed'" (click)="d.orderRiskMode='fixed'; requestLineMarginCalc(d)">$ Fixed</button>
+                </div>
+              </div>
+              <div class="invest-input-row">
+                <span class="invest-prefix">{{ d.orderRiskMode === 'pct' ? '%' : '$' }}</span>
+                <input type="number" class="modify-input" *ngIf="d.orderRiskMode==='pct'"
+                  [(ngModel)]="d.orderRiskPct" min="0.1" max="10" step="0.1" (ngModelChange)="requestLineMarginCalc(d)" />
+                <input type="number" class="modify-input" *ngIf="d.orderRiskMode==='fixed'"
+                  [(ngModel)]="d.orderRiskNzd" min="1" step="1" (ngModelChange)="requestLineMarginCalc(d)" />
+                <span class="invest-derived" *ngIf="d.orderRiskMode==='pct' && accountBalance">= ${{ lineRiskNzd(d) }}</span>
+              </div>
+              <div class="over-limit-warn" *ngIf="lineOverLimit(d)">⚠ Max ${{ maxRisk }} (10% of balance)</div>
+            </div>
+            <div class="trade-field">
+              <label>SL $ lost</label>
+              <div class="invest-input-row" style="margin-top:0">
+                <span class="invest-prefix loss">-$</span>
+                <input type="number" class="modify-input" [value]="lineRiskNzd(d)" disabled />
+              </div>
+            </div>
+            <div class="trade-field">
+              <label>Margin <span class="sub-label">(amount invested)</span></label>
+              <div class="invest-input-row" style="margin-top:0">
+                <span class="invest-prefix">$</span>
+                <input type="number" class="modify-input" [value]="d.marginNzd ?? ''" [placeholder]="d.marginNzd === null ? '...' : ''" disabled />
+              </div>
+            </div>
+            <div class="trade-field">
+              <div class="invest-mode-row">
+                <label>TP $ gained</label>
+                <label class="rr-auto-label">
+                  <input type="checkbox" [(ngModel)]="d.orderAutoRR" /> 1:
+                  <input *ngIf="d.orderAutoRR" type="number" class="modify-input rr-mult-input"
+                    [(ngModel)]="d.orderRRMultiplier" min="0.1" step="0.1" />
+                  <span *ngIf="!d.orderAutoRR" style="color:#475569">auto</span>
+                </label>
+              </div>
+              <div class="invest-input-row" style="margin-top:0">
+                <span class="invest-prefix win">+$</span>
+                <input type="number" class="modify-input" [value]="lineEffectiveTp(d)" [disabled]="d.orderAutoRR"
+                  (input)="d.orderTpNzd = +$any($event.target).value" min="0.01" step="1" />
+              </div>
+            </div>
+            <div class="trade-field">
+              <div class="invest-mode-row">
+                <label>SL from entry price</label>
+                <div class="mode-toggle">
+                  <button [class.active]="d.orderSlMode==='pct'"   (click)="d.orderSlMode='pct';   requestLineMarginCalc(d)">%</button>
+                  <button [class.active]="d.orderSlMode==='fixed'" (click)="d.orderSlMode='fixed'; requestLineMarginCalc(d)">$ pts</button>
+                </div>
+              </div>
+              <input *ngIf="d.orderSlMode==='pct'"   type="number" class="modify-input"
+                [(ngModel)]="d.orderSlPct"   min="0.01" step="0.1" placeholder="e.g. 1"   (ngModelChange)="requestLineMarginCalc(d)" />
+              <input *ngIf="d.orderSlMode==='fixed'" type="number" class="modify-input"
+                [(ngModel)]="d.orderSlFixed" min="0.00001" step="1" placeholder="e.g. 500" (ngModelChange)="requestLineMarginCalc(d)" />
+            </div>
+            <div class="rr-preview" *ngIf="(d.orderSlMode==='pct' ? d.orderSlPct : d.orderSlFixed) && lineEffectiveTp(d)">
+              <span class="loss">-${{ lineRiskNzd(d) }}</span>
+              <span class="rr-sep">→</span>
+              <span class="win">+${{ lineEffectiveTp(d) }}</span>
+              <span class="rr-label">(1:{{ lineRR(d) }})</span>
+            </div>
+            <div class="over-limit-warn" *ngIf="lineMarginInsufficient(d)">
+              ⚠ Need ${{ d.marginNzd }} margin — only ${{ freeMargin }} free
+            </div>
+            <button class="btn-arm"
+              [class.armed]="d.orderArmed"
+              [disabled]="d.orderStatus==='sending' || lineMarginInsufficient(d)"
+              (click)="toggleLineArmed(d)">
+              {{ d.orderArmed ? '🎯 Armed — waiting for price' : '🎯 Arm (auto-execute at price)' }}
+            </button>
+            <button class="btn-place"
+              [class.buy]="d.orderDirection==='buy'"
+              [class.sell]="d.orderDirection==='sell'"
+              [class.sent]="d.orderStatus==='sent'"
+              [class.error]="d.orderStatus==='error'"
+              [disabled]="d.orderStatus==='sending' || !activeSymbol || lineMarginInsufficient(d)"
+              (click)="executeLineOrder(d)">
+              <ng-container [ngSwitch]="d.orderStatus">
+                <span *ngSwitchCase="'sending'">Queueing…</span>
+                <span *ngSwitchCase="'sent'">✓ Sent to MT5</span>
+                <span *ngSwitchCase="'error'">✕ Failed</span>
+                <span *ngSwitchDefault>Send now</span>
+              </ng-container>
+            </button>
+          </div>
+
+        </div>
+      </ng-container>
 
       <div class="panel-divider"></div>
       <div class="panel-section-title">Open Positions</div>
@@ -159,10 +304,12 @@
           <div class="modify-row">
             <span class="sl-dot">●</span>
             <label>SL</label>
-            <span class="currency-prefix loss">-$</span>
+            <span class="currency-prefix" [class.win]="modifyForms[pos.ticket].slNzd > 0" [class.loss]="modifyForms[pos.ticket].slNzd <= 0">
+              {{ modifyForms[pos.ticket].slNzd > 0 ? '+$' : '-$' }}
+            </span>
             <input type="number" class="modify-input"
               [(ngModel)]="modifyForms[pos.ticket].slNzd"
-              min="0" step="0.01" placeholder="0.00" />
+              step="0.01" placeholder="0.00" />
           </div>
           <div class="modify-row">
             <span class="tp-dot">●</span>

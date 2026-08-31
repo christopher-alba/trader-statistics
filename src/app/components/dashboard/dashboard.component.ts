@@ -61,7 +61,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   get pageNumbers(): number[] { return Array.from({ length: this.totalPages }, (_, i) => i + 1); }
   setPage(p: number) { if (p >= 1 && p <= this.totalPages) this.page = p; }
 
-  private charts: Chart[] = [];
+  private pnlChart: Chart | null = null;
+  private donutChart: Chart | null = null;
+  private riskChart: Chart | null = null;
   private subs = new Subscription();
   private clockInterval: ReturnType<typeof setInterval> | null = null;
   private chartsInitialized = false;
@@ -76,13 +78,6 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnInit(): void {
     this.updateOpenDate();
     this.clockInterval = setInterval(() => this.updateOpenDate(), 60000);
-
-    // Initial load
-    this.tradeService.getTrades().subscribe((data) => {
-      this.openTrades = data.open;
-      this.closedTrades = data.closed;
-      this.updateCharts();
-    });
 
     // Live updates
     this.subs.add(
@@ -110,6 +105,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.initCharts();
     this.chartsInitialized = true;
+
+    // Always fetch from disk — don't rely solely on WebSocket events
+    this.tradeService.getTrades().subscribe((data) => {
+      this.openTrades = data.open;
+      this.closedTrades = data.closed;
+      this.updateCharts();
+      this.cdr.detectChanges();
+    });
   }
 
   ngOnDestroy(): void {
@@ -231,31 +234,51 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private destroyCharts(): void {
-    this.charts.forEach(c => c.destroy());
-    this.charts = [];
+    this.pnlChart?.destroy();   this.pnlChart = null;
+    this.donutChart?.destroy(); this.donutChart = null;
+    this.riskChart?.destroy();  this.riskChart = null;
   }
 
   private updateCharts(): void {
     if (!this.chartsInitialized) return;
-    this.destroyCharts();
-    this.initCharts();
+    this.updatePnLChart();
+    this.updateDonutChart();
+    this.updateRiskChart();
+  }
+
+  private parseDate(str: string): Date {
+    if (!str) return new Date(NaN);
+    // MT5 format "2026.08.30 00:10:29" — append Z so it's treated as UTC,
+    // matching ISO dates that already carry a Z suffix
+    if (/^\d{4}\./.test(str))
+      return new Date(str.replace(/^(\d{4})\.(\d{2})\.(\d{2})\s/, '$1-$2-$3T') + 'Z');
+    return new Date(str);
+  }
+
+  private buildPnLData(): { labels: string[]; data: number[] } {
+    const sorted = [...this.closedTrades].sort((a, b) => {
+      const ta = this.parseDate(a.closeDate).getTime();
+      const tb = this.parseDate(b.closeDate).getTime();
+      if (isNaN(ta) && isNaN(tb)) return 0;
+      if (isNaN(ta)) return 1;
+      if (isNaN(tb)) return -1;
+      return ta !== tb ? ta - tb : a.id - b.id;
+    });
+    let cumulative = 0;
+    const labels: string[] = [];
+    const data: number[] = [];
+    sorted.forEach((t, i) => {
+      cumulative += t.outcome === 'win' ? t.amount : -t.amount;
+      labels.push(`#${i + 1}`);
+      data.push(+cumulative.toFixed(2));
+    });
+    return { labels, data };
   }
 
   private createPnLChart(): void {
     if (!this.pnlChartRef) return;
-    const sorted = [...this.closedTrades].sort(
-      (a, b) => new Date(a.closeDate).getTime() - new Date(b.closeDate).getTime()
-    );
-    let cumulative = 0;
-    const labels: string[] = [];
-    const data: number[] = [];
-    sorted.forEach((t) => {
-      cumulative += t.outcome === 'win' ? t.amount : -t.amount;
-      labels.push(new Date(t.closeDate).toLocaleDateString('en-NZ'));
-      data.push(cumulative);
-    });
-
-    const chart = new Chart(this.pnlChartRef.nativeElement, {
+    const { labels, data } = this.buildPnLData();
+    this.pnlChart = new Chart(this.pnlChartRef.nativeElement, {
       type: 'line',
       data: {
         labels,
@@ -279,15 +302,21 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         },
       },
     });
-    this.charts.push(chart);
+  }
+
+  private updatePnLChart(): void {
+    if (!this.pnlChart) return;
+    const { labels, data } = this.buildPnLData();
+    this.pnlChart.data.labels = labels;
+    this.pnlChart.data.datasets[0].data = data;
+    this.pnlChart.update();
   }
 
   private createDonutChart(): void {
     if (!this.donutChartRef) return;
     const wins = this.closedTrades.filter(t => t.outcome === 'win').length;
     const losses = this.closedTrades.filter(t => t.outcome === 'loss').length;
-
-    const chart = new Chart(this.donutChartRef.nativeElement, {
+    this.donutChart = new Chart(this.donutChartRef.nativeElement, {
       type: 'doughnut',
       data: {
         labels: ['Wins', 'Losses'],
@@ -304,22 +333,26 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         plugins: { legend: { labels: { color: '#94a3b8' } } },
       },
     });
-    this.charts.push(chart);
+  }
+
+  private updateDonutChart(): void {
+    if (!this.donutChart) return;
+    this.donutChart.data.datasets[0].data = [
+      this.closedTrades.filter(t => t.outcome === 'win').length,
+      this.closedTrades.filter(t => t.outcome === 'loss').length,
+    ];
+    this.donutChart.update();
   }
 
   private createRiskChart(): void {
     if (!this.riskChartRef) return;
-    const all = [...this.closedTrades];
-    const labels = all.map(t => t.instrument);
-    const data = all.map(t => t.riskPct);
-
-    const chart = new Chart(this.riskChartRef.nativeElement, {
+    this.riskChart = new Chart(this.riskChartRef.nativeElement, {
       type: 'bar',
       data: {
-        labels,
+        labels: this.closedTrades.map(t => t.instrument),
         datasets: [{
           label: 'Risk %',
-          data,
+          data: this.closedTrades.map(t => t.riskPct),
           backgroundColor: 'rgba(59,130,246,0.6)',
           borderColor: '#3b82f6',
           borderWidth: 1,
@@ -335,7 +368,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         },
       },
     });
-    this.charts.push(chart);
+  }
+
+  private updateRiskChart(): void {
+    if (!this.riskChart) return;
+    this.riskChart.data.labels = this.closedTrades.map(t => t.instrument);
+    this.riskChart.data.datasets[0].data = this.closedTrades.map(t => t.riskPct);
+    this.riskChart.update();
   }
 
   formatCurrency(val: number): string {
@@ -344,7 +383,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   formatDate(iso: string): string {
     if (!iso) return '';
-    return new Date(iso).toLocaleString('en-NZ', {
+    return this.parseDate(iso).toLocaleString('en-NZ', {
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     });
