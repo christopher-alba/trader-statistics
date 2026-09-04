@@ -11,7 +11,7 @@
 //|  4. Drag onto any chart. Works across all symbols automatically. |
 //+------------------------------------------------------------------+
 #property copyright "TraderStatistics"
-#property version   "1.11"
+#property version   "1.13"
 #property strict
 
 //--- Inputs
@@ -26,17 +26,11 @@ int      g_FailBackoffSec    = 30;   // seconds between retries after a failure
 string   g_ChartSymbol       = "";   // symbol bars were last sent for
 uint     g_LastTickMs        = 0;    // millisecond timestamp of last OnTick post
 uint     g_LastAccountMs    = 0;    // millisecond timestamp of last account post
-uint     g_LastIndicatorMs  = 0;    // millisecond timestamp of last indicator post
 uint     g_LastBarMs        = 0;    // millisecond timestamp of last bar update post
-bool     g_IndicatorHistorySent = false; // send full history once handles are warm
+uint     g_LastDOMMs        = 0;    // millisecond timestamp of last DOM post
 input int TickIntervalMs      = 500;   // min ms between tick-driven updates
 input int AccountIntervalMs   = 500;   // min ms between account posts
-input int IndicatorIntervalMs = 500;   // min ms between indicator posts
-
-// Indicator handles
-int g_AO_Handle   = INVALID_HANDLE;
-int g_RSI_Handle  = INVALID_HANDLE;
-int g_MACD_Handle = INVALID_HANDLE;
+input int DOMIntervalMs       = 250;   // min ms between DOM posts
 
 //+------------------------------------------------------------------+
 //| Init                                                             |
@@ -54,19 +48,30 @@ int OnInit()
    else
       Print("[TS] WARNING: server not reachable (code=", code, "). Is npm run dev running?");
 
-   // Create indicator handles for the current chart
-   g_AO_Handle   = iAO(Symbol(), PERIOD_CURRENT);
-   g_RSI_Handle  = iRSI(Symbol(), PERIOD_CURRENT, 14, PRICE_CLOSE);
-   g_MACD_Handle = iMACD(Symbol(), PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
-
    PostAccountBalance();
    SendHistoricalBars(Symbol(), PERIOD_CURRENT, 3000);
    SendOpenPositions();
-   // Indicator history is sent from OnTimer once handles finish initializing
+   MarketBookAdd(Symbol());
    return INIT_SUCCEEDED;
 }
 
-void OnDeinit(const int reason) { EventKillTimer(); }
+void OnDeinit(const int reason)
+{
+   MarketBookRelease(Symbol());
+   EventKillTimer();
+}
+
+//+------------------------------------------------------------------+
+//| Book event — fires on each DOM change                            |
+//+------------------------------------------------------------------+
+void OnBookEvent(const string& symbol)
+{
+   if(symbol != Symbol()) return;
+   uint now = GetTickCount();
+   if(now - g_LastDOMMs < (uint)DOMIntervalMs) return;
+   g_LastDOMMs = now;
+   PostDOM(symbol);
+}
 
 //+------------------------------------------------------------------+
 //| Tick — price/account/positions updates at up to 5 Hz            |
@@ -102,12 +107,6 @@ void OnTick()
       PostAccountBalance();
    }
    SendOpenPositions();
-   if(now - g_LastIndicatorMs >= (uint)IndicatorIntervalMs)
-   {
-      g_LastIndicatorMs = now;
-      PostIndicators();
-   }
-
 }
 
 //+------------------------------------------------------------------+
@@ -123,17 +122,6 @@ void OnTimer()
       PostCurrentBar();
    }
 
-
-   // Send full indicator history once — wait until handles have calculated enough bars
-   if(!g_IndicatorHistorySent && g_AO_Handle != INVALID_HANDLE)
-   {
-      double probe[];
-      if(CopyBuffer(g_AO_Handle, 0, 1, 50, probe) >= 50)
-      {
-         SendHistoricalIndicators(Symbol(), PERIOD_CURRENT, 3000);
-         g_IndicatorHistorySent = true;
-      }
-   }
 
    PollMarginCalc();
    PollCloseCommands();
@@ -419,111 +407,21 @@ void PostAccountBalance()
    double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
    string currency    = AccountInfoString(ACCOUNT_CURRENCY);
 
+   ENUM_ACCOUNT_TRADE_MODE mode = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   string accountType = (mode == ACCOUNT_TRADE_MODE_REAL) ? "real" : "demo";
+
    string json = "{";
    json += "\"balance\":"     + DoubleToString(balance,     2) + ",";
    json += "\"equity\":"      + DoubleToString(equity,      2) + ",";
    json += "\"margin\":"      + DoubleToString(margin,      2) + ",";
    json += "\"freeMargin\":"  + DoubleToString(freeMargin,  2) + ",";
    json += "\"marginLevel\":" + DoubleToString(marginLevel, 2) + ",";
-   json += "\"currency\":\"" + currency + "\"";
+   json += "\"currency\":\""  + currency                       + "\",";
+   json += "\"accountType\":\"" + accountType                  + "\"";
    json += "}";
 
    if(PostRequest(ServerUrl + "/api/account", json))
       Print("[TS] Account posted: balance=", balance, " equity=", equity, " margin=", margin, " ", currency);
-}
-
-//+------------------------------------------------------------------+
-//| Send latest indicator values (MT5 → Angular)                    |
-//+------------------------------------------------------------------+
-void PostIndicators()
-{
-   if(g_AO_Handle == INVALID_HANDLE || g_RSI_Handle == INVALID_HANDLE || g_MACD_Handle == INVALID_HANDLE)
-      return;
-
-   double ao_buf[], rsi_buf[], macd_main[], macd_signal[];
-   ArraySetAsSeries(ao_buf,     true);
-   ArraySetAsSeries(rsi_buf,    true);
-   ArraySetAsSeries(macd_main,  true);
-   ArraySetAsSeries(macd_signal,true);
-
-   if(CopyBuffer(g_AO_Handle,   0, 0, 1, ao_buf)      <= 0) return;
-   if(CopyBuffer(g_RSI_Handle,  0, 0, 1, rsi_buf)     <= 0) return;
-   if(CopyBuffer(g_MACD_Handle, 0, 0, 1, macd_main)   <= 0) return;
-   if(CopyBuffer(g_MACD_Handle, 1, 0, 1, macd_signal) <= 0) return;
-   if(ao_buf[0] == EMPTY_VALUE || rsi_buf[0] == EMPTY_VALUE ||
-      macd_main[0] == EMPTY_VALUE || macd_signal[0] == EMPTY_VALUE) return;
-
-   datetime barTime = iTime(Symbol(), PERIOD_CURRENT, 0);
-   double   macdHist = macd_main[0] - macd_signal[0];
-
-   string json = "{";
-   json += "\"symbol\":\"" + Symbol() + "\",";
-   json += "\"time\":"     + IntegerToString((long)barTime) + ",";
-   json += "\"indicators\":{";
-   json += "\"AO\":"         + DoubleToString(ao_buf[0],    5) + ",";
-   json += "\"RSI\":"        + DoubleToString(rsi_buf[0],   2) + ",";
-   json += "\"MACD_main\":"  + DoubleToString(macd_main[0], 5) + ",";
-   json += "\"MACD_signal\":" + DoubleToString(macd_signal[0], 5) + ",";
-   json += "\"MACD_hist\":"  + DoubleToString(macdHist,     5);
-   json += "}}";
-
-   PostRequest(ServerUrl + "/api/indicators", json);
-}
-
-//+------------------------------------------------------------------+
-//| Send historical indicator values on startup                      |
-//+------------------------------------------------------------------+
-void SendHistoricalIndicators(string symbol, ENUM_TIMEFRAMES tf, int count)
-{
-   if(g_AO_Handle == INVALID_HANDLE || g_RSI_Handle == INVALID_HANDLE || g_MACD_Handle == INVALID_HANDLE)
-      return;
-
-   double ao_buf[], rsi_buf[], macd_main[], macd_signal[];
-   datetime times[];
-   ArraySetAsSeries(ao_buf,     false);
-   ArraySetAsSeries(rsi_buf,    false);
-   ArraySetAsSeries(macd_main,  false);
-   ArraySetAsSeries(macd_signal,false);
-   ArraySetAsSeries(times,      false);
-
-   int copied = CopyBuffer(g_AO_Handle, 0, 1, count, ao_buf);
-   if(copied <= 0) return;
-   CopyBuffer(g_RSI_Handle,  0, 1, copied, rsi_buf);
-   CopyBuffer(g_MACD_Handle, 0, 1, copied, macd_main);
-   CopyBuffer(g_MACD_Handle, 1, 1, copied, macd_signal);
-   CopyTime(symbol, tf, 1, copied, times);
-
-   // Send in chunks of 200
-   int chunkSize = 200;
-   int chunks = (int)MathCeil((double)copied / chunkSize);
-   for(int chunk = 0; chunk < chunks; chunk++)
-   {
-      int from = chunk * chunkSize;
-      int to   = MathMin(from + chunkSize, copied);
-
-      string json = "{\"symbol\":\"" + symbol + "\",\"history\":[";
-      for(int i = from; i < to; i++)
-      {
-         double hist = macd_main[i] - macd_signal[i];
-         if(ao_buf[i] == EMPTY_VALUE || rsi_buf[i] == EMPTY_VALUE ||
-            macd_main[i] == EMPTY_VALUE || macd_signal[i] == EMPTY_VALUE) continue;
-         if(i > from) json += ",";
-         json += "{\"time\":"         + IntegerToString((long)times[i]) + ",";
-         json += "\"AO\":"            + DoubleToString(ao_buf[i],     5) + ",";
-         json += "\"RSI\":"           + DoubleToString(rsi_buf[i],    2) + ",";
-         json += "\"MACD_main\":"     + DoubleToString(macd_main[i],  5) + ",";
-         json += "\"MACD_signal\":"   + DoubleToString(macd_signal[i],5) + ",";
-         json += "\"MACD_hist\":"     + DoubleToString(hist,          5) + "}";
-      }
-      json += "]}";
-
-      if(!PostRequest(ServerUrl + "/api/indicators/history", json))
-      {
-         Print("[TS] Indicator history chunk failed");
-         return;
-      }
-   }
-   Print("[TS] Sent ", copied, " historical indicator bars for ", symbol);
 }
 
 //+------------------------------------------------------------------+
@@ -803,7 +701,6 @@ void PostCurrentBar()
 
    long secsLeft = (long)(rates[0].time + PeriodSeconds(PERIOD_CURRENT)) - (long)TimeCurrent();
    if(secsLeft < 0) secsLeft = 0;
-   if(secsLeft > 60) secsLeft = 60;
 
    string json = "{\"symbol\":\"" + Symbol() + "\","
                + "\"secsLeft\":" + IntegerToString(secsLeft) + ","
@@ -872,6 +769,45 @@ void SendOpenPositions()
    }
    json += "]";
    PostRequest(ServerUrl + "/api/positions", json);
+}
+
+//+------------------------------------------------------------------+
+//| Send Depth of Market snapshot to Angular                        |
+//+------------------------------------------------------------------+
+void PostDOM(const string& symbol)
+{
+   MqlBookInfo book[];
+   if(!MarketBookGet(symbol, book)) return;
+   int n = ArraySize(book);
+   if(n == 0) return;
+
+   string bids = "", asks = "";
+   bool firstBid = true, firstAsk = true;
+
+   for(int i = 0; i < n; i++)
+   {
+      double vol = book[i].volume_real > 0 ? book[i].volume_real : (double)book[i].volume;
+      string entry = "{\"price\":" + DoubleToString(book[i].price, 8)
+                   + ",\"volume\":" + DoubleToString(vol, 4) + "}";
+      if(book[i].type == BOOK_TYPE_BUY || book[i].type == BOOK_TYPE_BUY_MARKET)
+      {
+         if(!firstBid) bids += ",";
+         bids += entry; firstBid = false;
+      }
+      else if(book[i].type == BOOK_TYPE_SELL || book[i].type == BOOK_TYPE_SELL_MARKET)
+      {
+         if(!firstAsk) asks += ",";
+         asks += entry; firstAsk = false;
+      }
+   }
+
+   string json = "{\"symbol\":\"" + symbol + "\","
+               + "\"bids\":[" + bids + "],"
+               + "\"asks\":[" + asks + "]}";
+
+   char post[], result[]; string rh;
+   StringToCharArray(json, post, 0, StringLen(json));
+   WebRequest("POST", ServerUrl + "/api/dom", "Content-Type: application/json\r\n", 2000, post, result, rh);
 }
 
 //+------------------------------------------------------------------+

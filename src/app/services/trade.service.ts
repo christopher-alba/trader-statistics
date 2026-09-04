@@ -9,8 +9,9 @@ const BASE = 'http://localhost:3000/api';
 export class TradeService {
   constructor(private http: HttpClient) {}
 
-  getTrades(): Observable<TradeData> {
-    return this.http.get<TradeData>(`${BASE}/trades`);
+  getTrades(type?: 'demo' | 'real'): Observable<TradeData> {
+    const url = type ? `${BASE}/trades/${type}` : `${BASE}/trades`;
+    return this.http.get<TradeData>(url);
   }
 
   openTrade(trade: Partial<OpenTrade>): Observable<OpenTrade> {
@@ -36,7 +37,7 @@ export class TradeService {
     return this.http.delete<{ cleared: boolean }>(`${BASE}/trades`);
   }
 
-  getAccount(): Observable<{ balance: number | null; equity: number | null; margin: number | null; freeMargin: number | null; marginLevel: number | null; currency: string | null; updatedAt: string | null }> {
+  getAccount(): Observable<{ balance: number | null; equity: number | null; margin: number | null; freeMargin: number | null; marginLevel: number | null; currency: string | null; accountType: 'demo' | 'real' | null; updatedAt: string | null }> {
     return this.http.get<any>(`${BASE}/account`);
   }
 
@@ -70,5 +71,13 @@ export class TradeService {
 
   getMarginCalcResult(): Observable<{ margin: number } | null> {
     return this.http.get<{ margin: number } | null>(`${BASE}/calc-margin/result`);
+  }
+
+  getGoals(): Observable<{ demo: { goalPct: number; balance: number | null }; real: { goalPct: number; balance: number | null } }> {
+    return this.http.get<any>(`${BASE}/goals`);
+  }
+
+  saveGoal(type: 'demo' | 'real', value: number): Observable<any> {
+    return this.http.post<any>(`${BASE}/goals`, { type, value });
   }
 }

@@ -1,4 +1,35 @@
 <div class="dashboard">
+  <!-- Account tabs -->
+  <div class="account-tabs">
+    <button class="account-tab" [class.active]="activeTab === 'demo'" (click)="switchTab('demo')">Demo</button>
+    <button class="account-tab" [class.active]="activeTab === 'real'" (click)="switchTab('real')">Real</button>
+    <button class="account-tab account-tab--compare" [class.active]="activeTab === 'compare'" (click)="switchTab('compare')">Compare</button>
+  </div>
+
+  <!-- Compare view -->
+  <div class="compare-view" *ngIf="activeTab === 'compare'">
+    <div class="compare-col">
+      <div class="compare-header demo-header">Demo</div>
+      <div class="compare-stat"><span>Trades</span><b>{{ demoStats.total }}</b></div>
+      <div class="compare-stat"><span>Win Rate</span><b [class.win]="demoStats.winRate !== '0%'">{{ demoStats.winRate }}</b></div>
+      <div class="compare-stat"><span>Net P&amp;L</span><b [class.win]="demoStats.netPnL >= 0" [class.loss]="demoStats.netPnL < 0">{{ formatCurrency(demoStats.netPnL) }}</b></div>
+      <div class="compare-stat"><span>Avg Win</span><b class="win">{{ formatCurrency(demoStats.avgWin) }}</b></div>
+      <div class="compare-stat"><span>Avg Loss</span><b class="loss">{{ formatCurrency(demoStats.avgLoss) }}</b></div>
+    </div>
+    <div class="compare-divider"></div>
+    <div class="compare-col">
+      <div class="compare-header real-header">Real</div>
+      <div class="compare-stat"><span>Trades</span><b>{{ realStats.total }}</b></div>
+      <div class="compare-stat"><span>Win Rate</span><b [class.win]="realStats.winRate !== '0%'">{{ realStats.winRate }}</b></div>
+      <div class="compare-stat"><span>Net P&amp;L</span><b [class.win]="realStats.netPnL >= 0" [class.loss]="realStats.netPnL < 0">{{ formatCurrency(realStats.netPnL) }}</b></div>
+      <div class="compare-stat"><span>Avg Win</span><b class="win">{{ formatCurrency(realStats.avgWin) }}</b></div>
+      <div class="compare-stat"><span>Avg Loss</span><b class="loss">{{ formatCurrency(realStats.avgLoss) }}</b></div>
+    </div>
+  </div>
+
+  <!-- Normal dashboard (hidden on compare tab) -->
+  <ng-container *ngIf="activeTab !== 'compare'">
+
   <!-- Stats Bar -->
   <div class="stats-bar">
     <div class="stat-card">
@@ -30,6 +61,56 @@
     <div class="stat-card">
       <span class="stat-label">Avg Risk %</span>
       <span class="stat-value">{{ avgRiskPct | number:'1.2-2' }}%</span>
+    </div>
+  </div>
+
+  <!-- Daily Goal Section -->
+  <div class="goal-section panel">
+    <div class="goal-header">
+      <span class="goal-title">Daily Goal</span>
+      <div class="goal-header-right">
+        <span class="goal-pct-badge">{{ goalTargetPct }}% target</span>
+        <button class="btn btn-ghost btn-sm" (click)="showGoalSettings = true">⚙ Configure</button>
+      </div>
+    </div>
+    <div class="goal-body">
+      <div class="goal-today">
+        <div class="goal-today-label">
+          Today
+          <span class="badge badge-win" *ngIf="todayGoalMet">Goal Met ✓</span>
+          <span class="goal-no-data" *ngIf="!accountBalance">— set account balance to track</span>
+        </div>
+        <div class="goal-amounts">
+          <span [class.win]="todayNetPnL > 0" [class.loss]="todayNetPnL < 0">
+            {{ formatCurrency(todayNetPnL) }}
+          </span>
+          <span class="goal-sep">/</span>
+          <span class="goal-target-amt">{{ formatCurrency(todayGoalTarget) }} target</span>
+        </div>
+        <div class="goal-bar-wrap">
+          <div class="goal-bar-fill"
+            [style.width.%]="todayGoalProgress"
+            [class.goal-met]="todayGoalMet"></div>
+        </div>
+        <div class="goal-bar-pct">{{ todayGoalProgress | number:'1.0-0' }}% of daily goal</div>
+      </div>
+
+      <div class="goal-divider"></div>
+
+      <div class="goal-stats">
+        <div class="goal-stat">
+          <span class="goal-stat-val win">{{ goalMetCount }}</span>
+          <span class="goal-stat-label">Goals Met</span>
+        </div>
+        <div class="goal-stat">
+          <span class="goal-stat-val">{{ totalTradingDays }}</span>
+          <span class="goal-stat-label">Trading Days</span>
+        </div>
+        <div class="goal-stat">
+          <span class="goal-stat-val" [class.win]="goalMetCount > 0">{{ goalHitRate }}</span>
+          <span class="goal-stat-label">Hit Rate</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -110,6 +191,19 @@
     <h3 class="panel-title">Cumulative P&amp;L</h3>
     <div class="chart-container chart-container--wide">
       <canvas #pnlChart></canvas>
+    </div>
+  </div>
+
+  <!-- 1-Year Forecast Chart -->
+  <div class="panel chart-panel chart-panel--wide">
+    <div class="forecast-header">
+      <h3 class="panel-title">1-Year Forecast</h3>
+      <span class="forecast-subtitle">
+        Projected growth at current pace vs. hitting {{ goalTargetPct }}% goal every trading day
+      </span>
+    </div>
+    <div class="chart-container chart-container--wide">
+      <canvas #forecastChart></canvas>
     </div>
   </div>
 
@@ -196,6 +290,27 @@
         <button class="page-btn" (click)="setPage(page + 1)" [disabled]="page === totalPages">›</button>
         <span class="page-info">Page {{ page }} of {{ totalPages }}</span>
       </div>
+    </div>
+  </div>
+
+  </ng-container>
+</div>
+
+<!-- Goal Settings Modal -->
+<div class="modal-overlay" *ngIf="showGoalSettings" (click)="showGoalSettings = false">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <h2 class="modal-title">Daily Goal Settings</h2>
+    <div class="form-group">
+      <label>Daily Win Target (% of opening balance)</label>
+      <input type="number" [(ngModel)]="goalSettingInput" name="goalPct"
+        min="0.1" max="100" step="0.1" class="input" placeholder="2.0" />
+      <p class="form-hint">
+        e.g. 2 means you aim to gain 2% of your starting balance each trading day.
+      </p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" (click)="showGoalSettings = false">Cancel</button>
+      <button type="button" class="btn btn-primary" (click)="saveGoalSettings()">Save</button>
     </div>
   </div>
 </div>

@@ -101,7 +101,251 @@
   min-width: 0;
 }
 
+// ── Candle Statistics bar ────────────────────────────────────────
+.candle-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.75rem;
+  height: 26px;
+  background: #151e2d;
+  border-bottom: 1px solid #1e2d42;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  font-size: 0.74rem;
+}
+
+.cs-label {
+  color: #475569;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.cs-divider {
+  width: 1px;
+  height: 14px;
+  background: #1e2d42;
+  flex-shrink: 0;
+}
+
+.cs-group {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.cs-key {
+  color: #475569;
+  white-space: nowrap;
+  margin-right: 0.1rem;
+}
+
+.cs-val  { color: #94a3b8; white-space: nowrap; }
+.cs-muted { color: #334155; white-space: nowrap; }
+
+.cs-green { color: #22c55e; white-space: nowrap; }
+.cs-red   { color: #ef4444; white-space: nowrap; }
+
+.cs-prob-track {
+  width: 64px;
+  height: 6px;
+  background: rgba(239, 68, 68, 0.35);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.cs-prob-green {
+  height: 100%;
+  background: #22c55e;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+// ── DOM overlay (absolute — never pushes charts) ─────────────────
+.dom-overlay {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dom-overlay-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(21, 30, 45, 0.82);
+  backdrop-filter: blur(4px);
+  border: 1px solid #1e2d42;
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  height: 24px;
+  white-space: nowrap;
+}
+
+.dom-signal {
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.dom-overlay-book {
+  display: flex;
+  gap: 2px;
+}
+
+.dom-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: rgba(21, 30, 45, 0.82);
+  backdrop-filter: blur(4px);
+  border: 1px solid #1e2d42;
+  border-radius: 4px;
+  padding: 2px;
+  min-width: 110px;
+}
+
+.dom-level {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.67rem;
+  position: relative;
+  padding: 0.05rem 0.25rem;
+  border-radius: 2px;
+  overflow: hidden;
+  height: 16px;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: var(--bar-pct, 0%);
+    border-radius: 2px;
+  }
+
+  &--ask { color: #f87171; &::before { background: rgba(239, 68, 68, 0.18); } }
+  &--bid { color: #4ade80; &::before { background: rgba(34, 197, 94, 0.18); } }
+}
+
+.dom-level-vol {
+  font-weight: 700;
+  min-width: 26px;
+  text-align: right;
+  position: relative;
+  z-index: 1;
+}
+
+.dom-level-price {
+  color: #94a3b8;
+  position: relative;
+  z-index: 1;
+}
+
+.candle-stats-bar--streak {
+  border-top: 1px solid #1a2640;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.cs-streak-chip {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+  b { font-weight: 700; }
+  &--green { background: rgba(34, 197, 94, 0.1); color: #4ade80; }
+  &--red   { background: rgba(239, 68, 68, 0.1); color: #f87171; }
+}
+
+.cs-streak-chance {
+  font-size: 0.62rem;
+  opacity: 0.65;
+}
+
+.chart-main-row {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
 .chart-container {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+:host ::ng-deep .wall-zone-overlay {
+  position: absolute;
+  left: 0;
+  right: 52px; // leave room for the price axis
+  pointer-events: none;
+  z-index: 2;
+  display: none;
+  background: rgba(96, 165, 250, 0.06);
+  border-top: 1px dashed rgba(248, 113, 113, 0.55);
+  border-bottom: 1px dashed rgba(74, 222, 128, 0.55);
+}
+
+.chart-resize-handle {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: #1e2d42;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  &:hover { background: #2a3f5f; }
+}
+
+.chart-resize-grip {
+  width: 1px;
+  height: 32px;
+  background: #3b82f6;
+  border-radius: 1px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  .chart-resize-handle:hover & { opacity: 1; }
+}
+
+.chart-main-row.resizing {
+  cursor: col-resize;
+  user-select: none;
+  .chart-resize-handle { background: #2a3f5f; }
+  .chart-resize-grip { opacity: 1; }
+}
+
+.tick-chart-wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #161e2e;
+}
+
+.tick-chart-header {
+  font-size: 0.7rem;
+  color: #64748b;
+  padding: 0.2rem 0.5rem;
+  flex-shrink: 0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tick-chart-container {
   flex: 1;
   min-height: 0;
 }
@@ -181,6 +425,40 @@
   padding: 0.35rem 0.75rem;
 }
 
+.ma-control {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ma-type-select {
+  font-size: 0.78rem;
+  background: #1e2535;
+  color: #94a3b8;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.28rem 0.4rem;
+  cursor: pointer;
+  &:focus { outline: none; border-color: #f59e0b; }
+}
+
+.ma-period-input {
+  width: 52px;
+  font-size: 0.78rem;
+  background: #1e2535;
+  color: #e2e8f0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.28rem 0.4rem;
+  text-align: center;
+  &:focus { outline: none; border-color: #f59e0b; }
+}
+
+.ma-sep {
+  font-size: 0.75rem;
+  color: #475569;
+}
+
 .ind-dropdown {
   position: absolute;
   top: calc(100% + 4px);
@@ -252,6 +530,42 @@
 }
 
 // ── Open trade form ──────────────────────────────────────────────
+// ── Circuit breaker banner ───────────────────────────────────────
+.trading-disabled-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.25rem;
+}
+
+.tdb-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f87171;
+}
+
+.tdb-reason {
+  font-size: 0.78rem;
+  color: #fca5a5;
+}
+
+.tdb-stats {
+  font-size: 0.7rem;
+  color: #7f1d1d;
+  color: rgba(248, 113, 113, 0.6);
+}
+
+
+.sl-auto-hint {
+  font-size: 0.69rem;
+  color: #475569;
+  b { color: #64748b; }
+}
+
 .open-trade-section {
   display: flex;
   flex-direction: column;
@@ -500,6 +814,56 @@
   &:hover:not(:disabled) { background: rgba(59, 130, 246, 0.22); }
   &:disabled { opacity: 0.6; cursor: default; }
 }
+
+// ── Position odds ────────────────────────────────────────────────
+.pos-odds {
+  margin-top: 0.5rem;
+}
+
+.pos-odds-bar {
+  display: flex;
+  height: 20px;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.pos-odds-sl {
+  background: rgba(239, 68, 68, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 0.3rem;
+  color: #fff;
+  transition: width 0.4s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pos-odds-tp {
+  background: rgba(34, 197, 94, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 0.3rem;
+  color: #fff;
+  transition: width 0.4s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pos-odds-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.2rem;
+  font-size: 0.67rem;
+}
+
+.pos-odds-sl-label { color: #f87171; }
+.pos-odds-tp-label { color: #4ade80; }
+.pos-odds-samples  { color: #334155; font-size: 0.62rem; }
 
 .btn.draw-active {
   background: rgba(250, 204, 21, 0.15);

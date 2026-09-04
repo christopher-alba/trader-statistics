@@ -10,16 +10,47 @@
       <button class="btn btn-secondary ind-btn" [class.draw-active]="drawMode" (click)="toggleDrawMode()">
         ✏ {{ drawMode ? 'Drawing' : 'Draw' }}
       </button>
-      <div class="indicator-picker-wrap">
-        <button class="btn btn-secondary ind-btn" (click)="showIndicatorPicker = !showIndicatorPicker">
-          + Indicator
+      <div class="ma-control">
+        <button class="btn btn-secondary ind-btn" [class.draw-active]="maEnabled" (click)="toggleMA()">
+          MA{{ maEnabled ? ' ' + maPeriod : '' }}
         </button>
-        <div class="ind-dropdown" *ngIf="showIndicatorPicker">
-          <div *ngIf="!availableToAdd.length" class="ind-dropdown-empty">All indicators added</div>
-          <button *ngFor="let ind of availableToAdd" class="ind-dropdown-item" (click)="addIndicator(ind.name)">
-            {{ ind.label }}
-          </button>
-        </div>
+        <ng-container *ngIf="maEnabled">
+          <select class="ma-type-select" [(ngModel)]="maType" (ngModelChange)="onMAParamChange()">
+            <option value="SMA">SMA</option>
+            <option value="EMA">EMA</option>
+          </select>
+          <input type="number" class="ma-period-input" [(ngModel)]="maPeriod" min="2" max="500" step="1"
+            (ngModelChange)="onMAParamChange()" />
+        </ng-container>
+      </div>
+      <!-- RSI -->
+      <div class="ma-control">
+        <button class="btn btn-secondary ind-btn" [class.draw-active]="rsiEnabled" (click)="toggleRSI()">
+          RSI{{ rsiEnabled ? ' ' + rsiPeriod : '' }}
+        </button>
+        <input *ngIf="rsiEnabled" type="number" class="ma-period-input" [(ngModel)]="rsiPeriod"
+          min="2" max="200" step="1" (ngModelChange)="onRSIParamChange()" />
+      </div>
+
+      <!-- MACD -->
+      <div class="ma-control">
+        <button class="btn btn-secondary ind-btn" [class.draw-active]="macdEnabled" (click)="toggleMACD()">
+          MACD{{ macdEnabled ? ' ' + macdFast + '/' + macdSlow + '/' + macdSignalPeriod : '' }}
+        </button>
+        <ng-container *ngIf="macdEnabled">
+          <input type="number" class="ma-period-input" [(ngModel)]="macdFast"         min="1" max="100" step="1" (ngModelChange)="onMACDParamChange()" />
+          <span class="ma-sep">/</span>
+          <input type="number" class="ma-period-input" [(ngModel)]="macdSlow"         min="1" max="200" step="1" (ngModelChange)="onMACDParamChange()" />
+          <span class="ma-sep">/</span>
+          <input type="number" class="ma-period-input" [(ngModel)]="macdSignalPeriod" min="1" max="50"  step="1" (ngModelChange)="onMACDParamChange()" />
+        </ng-container>
+      </div>
+
+      <!-- AO -->
+      <div class="ma-control">
+        <button class="btn btn-secondary ind-btn" [class.draw-active]="aoEnabled" (click)="toggleAO()">
+          AO
+        </button>
       </div>
     </div>
 
@@ -39,20 +70,158 @@
 
   <div class="chart-body">
     <div class="chart-area">
-      <div #chartContainer class="chart-container"></div>
-      <div #indicatorPanesEl class="indicator-panes-host">
-        <!-- active indicator label/remove pills -->
-        <div class="ind-pane-pills" *ngIf="indicatorPanesList().length">
-          <span *ngFor="let ind of indicatorPanesList()" class="ind-pill">
-            {{ ind.label }}
-            <button class="ind-pill-remove" (click)="removeIndicator(ind.name)">✕</button>
+
+      <!-- Candle Statistics -->
+      <div class="candle-stats-bar" *ngIf="candleStats || streakStats">
+        <ng-container *ngIf="candleStats as cs">
+          <span class="cs-label">{{ cs.sampleSize }} candles</span>
+          <div class="cs-divider"></div>
+
+          <div class="cs-group">
+            <span class="cs-key">Next candle</span>
+            <span class="cs-green">▲ {{ cs.pGreen | number:'1.0-1' }}%</span>
+            <div class="cs-prob-track">
+              <div class="cs-prob-green" [style.width.%]="cs.pGreen"></div>
+            </div>
+            <span class="cs-red">▼ {{ cs.pRed | number:'1.0-1' }}%</span>
+          </div>
+
+          <div class="cs-divider"></div>
+
+          <div class="cs-group">
+            <span class="cs-key">Range</span>
+            <span class="cs-val">avg <b>{{ formatStat(cs.avgRange) }}</b></span>
+            <span class="cs-muted">max {{ formatStat(cs.maxRange) }}</span>
+            <span class="cs-muted">min {{ formatStat(cs.minRange) }}</span>
+          </div>
+
+          <div class="cs-divider"></div>
+
+          <div class="cs-group">
+            <span class="cs-key">From open</span>
+            <span class="cs-green">↑ avg <b>{{ formatStat(cs.avgUpMove) }}</b></span>
+            <span class="cs-red">↓ avg <b>{{ formatStat(cs.avgDownMove) }}</b></span>
+          </div>
+        </ng-container>
+      </div>
+
+      <!-- Streak Statistics row -->
+      <div class="candle-stats-bar candle-stats-bar--streak" *ngIf="streakStats">
+        <!-- Current streak + continuation probability -->
+        <div class="cs-group">
+          <span class="cs-key">Streak</span>
+          <span [class.cs-green]="streakStats.currentColor === 'green'"
+                [class.cs-red]="streakStats.currentColor === 'red'"
+                [class.cs-muted]="streakStats.currentColor === 'none'">
+            {{ streakStats.currentCount }}×{{ streakStats.currentColor === 'green' ? '▲' : streakStats.currentColor === 'red' ? '▼' : '—' }}
           </span>
         </div>
+
+        <div class="cs-divider"></div>
+
+        <div class="cs-group" *ngIf="streakStats.currentColor !== 'none' && streakStats.samples > 0">
+          <span class="cs-key">Continues</span>
+          <span [class.cs-green]="streakStats.currentColor === 'green'"
+                [class.cs-red]="streakStats.currentColor === 'red'">
+            <b>{{ streakStats.pContinue | number:'1.0-1' }}%</b>
+          </span>
+          <span class="cs-muted">reverse {{ streakStats.pReverse | number:'1.0-1' }}%</span>
+          <span class="cs-muted">({{ streakStats.samples }} samples)</span>
+        </div>
+
+        <div class="cs-divider"></div>
+
+        <!-- Green streak distribution -->
+        <div class="cs-group">
+          <span class="cs-green cs-key">▲ streaks</span>
+          <div *ngFor="let s of streakStats.greenStreaks" class="cs-streak-chip cs-streak-chip--green">
+            <span>{{ s.length }}×<b>{{ s.count }}</b></span>
+            <span class="cs-streak-chance">{{ s.chance | number:'1.0-1' }}%</span>
+          </div>
+        </div>
+
+        <div class="cs-divider"></div>
+
+        <!-- Red streak distribution -->
+        <div class="cs-group">
+          <span class="cs-red cs-key">▼ streaks</span>
+          <div *ngFor="let s of streakStats.redStreaks" class="cs-streak-chip cs-streak-chip--red">
+            <span>{{ s.length }}×<b>{{ s.count }}</b></span>
+            <span class="cs-streak-chance">{{ s.chance | number:'1.0-1' }}%</span>
+          </div>
+        </div>
       </div>
+
+      <div class="chart-main-row" [class.resizing]="tickChartResizing">
+        <div #chartContainer class="chart-container"></div>
+
+        <!-- DOM overlay — absolute, never affects chart height -->
+        <div class="dom-overlay" *ngIf="domStats as d">
+          <!-- Summary row -->
+          <div class="dom-overlay-summary">
+            <span [class.cs-green]="d.signal === 'bullish'"
+                  [class.cs-red]="d.signal === 'bearish'"
+                  [class.cs-val]="d.signal === 'neutral'"
+                  class="dom-signal">
+              {{ d.signal === 'bullish' ? '▲ Bullish' : d.signal === 'bearish' ? '▼ Bearish' : '→ Neutral' }}
+            </span>
+            <div class="cs-divider"></div>
+            <span class="cs-green">▲ {{ d.bidPct | number:'1.0-1' }}%</span>
+            <div class="cs-prob-track">
+              <div class="cs-prob-green" [style.width.%]="d.bidPct"></div>
+            </div>
+            <span class="cs-red">▼ {{ d.askPct | number:'1.0-1' }}%</span>
+            <div class="cs-divider"></div>
+            <span class="cs-key">Buy wall</span>
+            <span class="cs-green"><b>{{ d.biggestBid.volume }}</b>&nbsp;@&nbsp;{{ d.biggestBid.price }}</span>
+            <div class="cs-divider"></div>
+            <span class="cs-key">Sell wall</span>
+            <span class="cs-red"><b>{{ d.biggestAsk.volume }}</b>&nbsp;@&nbsp;{{ d.biggestAsk.price }}</span>
+          </div>
+
+          <!-- Order book levels -->
+          <div class="dom-overlay-book">
+            <div class="dom-levels dom-levels--ask">
+              <div *ngFor="let l of d.topAsks" class="dom-level dom-level--ask"
+                   [style.--bar-pct]="(l.volume / d.biggestAsk.volume * 100) + '%'">
+                <span class="dom-level-vol">{{ l.volume }}</span>
+                <span class="dom-level-price">{{ l.price }}</span>
+              </div>
+            </div>
+            <div class="dom-levels dom-levels--bid">
+              <div *ngFor="let l of d.topBids" class="dom-level dom-level--bid"
+                   [style.--bar-pct]="(l.volume / d.biggestBid.volume * 100) + '%'">
+                <span class="dom-level-vol">{{ l.volume }}</span>
+                <span class="dom-level-price">{{ l.price }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-resize-handle" (mousedown)="onResizeHandleMouseDown($event)">
+          <div class="chart-resize-grip"></div>
+        </div>
+        <div class="tick-chart-wrap" [style.width.px]="tickChartWidth">
+          <div class="tick-chart-header">Tick</div>
+          <div #tickChartContainer class="tick-chart-container"></div>
+        </div>
+      </div>
+      <div #indicatorPanesEl class="indicator-panes-host"></div>
     </div>
 
     <!-- Positions panel -->
     <div class="positions-panel">
+
+      <!-- Circuit breaker banner -->
+      <div class="trading-disabled-banner" *ngIf="tradingBlocked">
+        <div class="tdb-title">⛔ Trading Disabled</div>
+        <div class="tdb-reason">{{ tradingState.disabledReason }}</div>
+        <div class="tdb-stats">
+          {{ tradingState.tradesToday }} trade{{ tradingState.tradesToday !== 1 ? 's' : '' }} today
+          · {{ tradingState.consecutiveLosses }} consecutive loss{{ tradingState.consecutiveLosses !== 1 ? 'es' : '' }}
+          · resets midnight
+        </div>
+      </div>
 
       <!-- Open trade form -->
       <div class="open-trade-section">
@@ -73,21 +242,14 @@
             <span class="invest-prefix">{{ riskMode === 'pct' ? '%' : '$' }}</span>
             <input type="number" class="modify-input"
               *ngIf="riskMode === 'pct'"
-              [(ngModel)]="riskPct" min="0.1" max="10" step="0.1" (ngModelChange)="requestMarginCalc()" />
+              [(ngModel)]="riskPct" min="0.1" max="2" step="0.1" (ngModelChange)="requestMarginCalc()" />
             <input type="number" class="modify-input"
               *ngIf="riskMode === 'fixed'"
               [(ngModel)]="riskFixed" min="1" step="1" (ngModelChange)="requestMarginCalc()" />
             <span class="invest-derived" *ngIf="riskMode === 'pct' && accountBalance">= ${{ tradeRiskNzd }}</span>
           </div>
           <div class="over-limit-warn" *ngIf="overLimit">
-            ⚠ Max ${{ maxRisk }} (10% of balance)
-          </div>
-        </div>
-        <div class="trade-field">
-          <label>SL $ lost</label>
-          <div class="invest-input-row" style="margin-top:0">
-            <span class="invest-prefix loss">-$</span>
-            <input type="number" class="modify-input" [value]="tradeRiskNzd" disabled />
+            ⚠ Max ${{ maxRisk }} (2% of balance)
           </div>
         </div>
         <div class="trade-field">
@@ -113,18 +275,10 @@
               (input)="tradeTpNzd = +$any($event.target).value" min="0.01" step="1" />
           </div>
         </div>
-        <div class="trade-field">
-          <div class="invest-mode-row">
-            <label>SL from entry price</label>
-            <div class="mode-toggle">
-              <button [class.active]="tradeSlMode === 'pct'"   (click)="tradeSlMode = 'pct';   requestMarginCalc()">%</button>
-              <button [class.active]="tradeSlMode === 'fixed'" (click)="tradeSlMode = 'fixed'; requestMarginCalc()">$ pts</button>
-            </div>
-          </div>
-          <input *ngIf="tradeSlMode === 'pct'"   type="number" class="modify-input" [(ngModel)]="tradeSl"      min="0.01"    step="0.1"  placeholder="e.g. 1"   (ngModelChange)="requestMarginCalc()" />
-          <input *ngIf="tradeSlMode === 'fixed'" type="number" class="modify-input" [(ngModel)]="tradeSlFixed" min="0.00001" step="1"    placeholder="e.g. 500" (ngModelChange)="requestMarginCalc()" />
+        <div class="sl-auto-hint" *ngIf="candleStats">
+          SL auto · avg candle range <b>{{ formatStat(candleStats.avgRange) }}</b> pts
         </div>
-        <div class="rr-preview" *ngIf="tradeSl && tradeEffectiveTp">
+        <div class="rr-preview" *ngIf="tradeEffectiveTp">
           <span class="loss">-${{ tradeRiskNzd }}</span>
           <span class="rr-sep">→</span>
           <span class="win">+${{ tradeEffectiveTp }}</span>
@@ -135,8 +289,8 @@
           ⚠ Need ${{ marginNzd }} margin — only ${{ freeMargin }} free
         </div>
         <button class="btn-place" [class.buy]="tradeDirection === 'buy'" [class.sell]="tradeDirection === 'sell'"
-          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol || marginInsufficient">
-          {{ tradePlacing ? 'Queueing…' : tradeCooldown > 0 ? 'Wait ' + tradeCooldown + 's…' : (tradeDirection === 'buy' ? '▲ Buy ' : '▼ Sell ') + activeSymbol }}
+          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol || marginInsufficient || tradingBlocked">
+          {{ tradingBlocked ? '⛔ Trading Disabled' : tradePlacing ? 'Queueing…' : tradeCooldown > 0 ? 'Wait ' + tradeCooldown + 's…' : (tradeDirection === 'buy' ? '▲ Buy ' : '▼ Sell ') + activeSymbol }}
         </button>
       </div>
 
@@ -200,13 +354,6 @@
                 <span class="invest-derived" *ngIf="d.orderRiskMode==='pct' && accountBalance">= ${{ lineRiskNzd(d) }}</span>
               </div>
               <div class="over-limit-warn" *ngIf="lineOverLimit(d)">⚠ Max ${{ maxRisk }} (10% of balance)</div>
-            </div>
-            <div class="trade-field">
-              <label>SL $ lost</label>
-              <div class="invest-input-row" style="margin-top:0">
-                <span class="invest-prefix loss">-$</span>
-                <input type="number" class="modify-input" [value]="lineRiskNzd(d)" disabled />
-              </div>
             </div>
             <div class="trade-field">
               <label>Margin <span class="sub-label">(amount invested)</span></label>
@@ -326,6 +473,25 @@
             <span *ngIf="modifyForms[pos.ticket].saved">Sent ✓</span>
             <span *ngIf="!modifyForms[pos.ticket].saving && !modifyForms[pos.ticket].saved">Update SL/TP</span>
           </button>
+        </ng-container>
+
+        <!-- Position odds -->
+        <ng-container *ngIf="positionOdds.get(pos.ticket) as odds">
+          <div class="pos-odds" *ngIf="odds.samples > 0">
+            <div class="pos-odds-bar">
+              <div class="pos-odds-sl"  [style.width.%]="odds.pSL">
+                <span *ngIf="odds.pSL > 18">SL {{ odds.pSL | number:'1.0-1' }}%</span>
+              </div>
+              <div class="pos-odds-tp"  [style.width.%]="odds.pTP">
+                <span *ngIf="odds.pTP > 18">TP {{ odds.pTP | number:'1.0-1' }}%</span>
+              </div>
+            </div>
+            <div class="pos-odds-footer">
+              <span class="pos-odds-sl-label">SL {{ odds.pSL | number:'1.0-1' }}%</span>
+              <span class="pos-odds-samples">{{ odds.samples | number }} simulations</span>
+              <span class="pos-odds-tp-label">TP {{ odds.pTP | number:'1.0-1' }}%</span>
+            </div>
+          </div>
         </ng-container>
       </div>
     </div>

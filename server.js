@@ -10,23 +10,28 @@ const path = require('path');
 
 const app = express();
 const PORT = 3000;
-const TRADES_FILE = path.join(__dirname, 'server', 'trades.json');
-
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // --- Persistence helpers ---
+function isRealAccount() {
+  return accountData && accountData.accountType === 'real';
+}
+
+function tradesFile() {
+  return path.join(__dirname, 'server', isRealAccount() ? 'real_trades.json' : 'demo_trades.json');
+}
+
 function loadTrades() {
   try {
-    const raw = fs.readFileSync(TRADES_FILE, 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(fs.readFileSync(tradesFile(), 'utf8'));
   } catch {
     return { open: [], closed: [] };
   }
 }
 
 function saveTrades(data) {
-  fs.writeFileSync(TRADES_FILE, JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(tradesFile(), JSON.stringify(data, null, 2), 'utf8');
 }
 
 // --- WebSocket setup ---
@@ -49,6 +54,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'update', data: trades }));
   ws.send(JSON.stringify({ type: 'account', data: accountData }));
   ws.send(JSON.stringify({ type: 'positions', data: lastPositions }));
+  ws.send(JSON.stringify({ type: 'trading_state', data: tradingState }));
 
   ws.on('close', () => console.log('[WS] Client disconnected'));
   ws.on('error', (err) => console.error('[WS] Error:', err.message));
@@ -56,16 +62,35 @@ wss.on('connection', (ws) => {
 
 // --- REST API ---
 
-// GET all trades
+// GET all trades (current account type)
 app.get('/api/trades', (req, res) => {
-  const trades = loadTrades();
-  res.json(trades);
+  res.json(loadTrades());
+});
+
+// GET trades by account type explicitly
+app.get('/api/trades/demo', (req, res) => {
+  try {
+    res.json(JSON.parse(fs.readFileSync(path.join(__dirname, 'server', 'demo_trades.json'), 'utf8')));
+  } catch { res.json({ open: [], closed: [] }); }
+});
+
+app.get('/api/trades/real', (req, res) => {
+  try {
+    res.json(JSON.parse(fs.readFileSync(path.join(__dirname, 'server', 'real_trades.json'), 'utf8')));
+  } catch { res.json({ open: [], closed: [] }); }
 });
 
 // POST open a new trade
 app.post('/api/trade/open', (req, res) => {
   const trades = loadTrades();
   const body = req.body;
+
+  // Reject phantom trades — missing symbol or zero price
+  const instrument = body.instrument || body.symbol || '';
+  if (!instrument || instrument === 'UNKNOWN' || !body.price || body.price === 0) {
+    console.log(`[API] Phantom trade rejected: instrument="${instrument}" price=${body.price}`);
+    return res.status(400).json({ error: 'incomplete trade data' });
+  }
 
   // Dedup: reject if this MT5 ticket/positionId already exists in open or closed
   if (body.mt5Ticket || body.positionId) {
@@ -157,6 +182,7 @@ app.post('/api/trade/close', (req, res) => {
   trades.closed.unshift(closedTrade); // newest first
   saveTrades(trades);
   broadcast(trades);
+  applyCircuitBreaker(closedTrade.outcome);
 
   console.log(`[API] Trade closed: ${closedTrade.instrument} outcome=${closedTrade.outcome} amount=${closedTrade.amount}`);
   res.json(closedTrade);
@@ -290,65 +316,21 @@ app.delete('/api/modify/:id', (req, res) => {
   res.json({ removed: true });
 });
 
-// --- Indicator data (MT5 → Angular) ---
-const indicatorsStore = {}; // { BTCUSD: { AO: [{time,value},...], RSI: [...] } }
-const INDICATOR_BUFFER = 3500;
+// --- Depth of Market (MT5 → Angular) ---
+const domStore = {}; // { BTCUSD: { bids, asks } }
 
-app.post('/api/indicators', (req, res) => {
-  const { symbol, time, indicators } = req.body;
-  if (!symbol || !indicators || !time) return res.status(400).json({ error: 'invalid' });
+app.post('/api/dom', (req, res) => {
+  const { symbol, bids, asks } = req.body;
+  if (!symbol) return res.status(400).json({ error: 'invalid' });
   const sym = symbol.toUpperCase();
-  if (!indicatorsStore[sym]) indicatorsStore[sym] = {};
-
-  Object.entries(indicators).forEach(([name, value]) => {
-    if (!indicatorsStore[sym][name]) indicatorsStore[sym][name] = [];
-    const arr = indicatorsStore[sym][name];
-    const point = { time: Number(time), value: Number(value) };
-    // Replace last entry if same timestamp (forming bar), otherwise append
-    if (arr.length && arr[arr.length - 1].time === point.time) {
-      arr[arr.length - 1] = point;
-    } else {
-      arr.push(point);
-      if (arr.length > INDICATOR_BUFFER) arr.shift();
-    }
-  });
-
-  const msg = JSON.stringify({ type: 'indicator_update', data: { symbol: sym, time: Number(time), indicators } });
+  domStore[sym] = { bids: bids || [], asks: asks || [] };
+  const msg = JSON.stringify({ type: 'dom', data: { symbol: sym, bids: bids || [], asks: asks || [] } });
   wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
   res.json({ ok: true });
 });
 
-app.get('/api/indicators/:symbol', (req, res) => {
-  const data = indicatorsStore[req.params.symbol.toUpperCase()];
-  res.json(data || {});
-});
-
-app.post('/api/indicators/history', (req, res) => {
-  const { symbol, history } = req.body;
-  if (!symbol || !Array.isArray(history)) return res.status(400).json({ error: 'invalid' });
-  const sym = symbol.toUpperCase();
-  if (!indicatorsStore[sym]) indicatorsStore[sym] = {};
-
-  history.forEach(point => {
-    const { time, ...values } = point;
-    Object.entries(values).forEach(([name, value]) => {
-      if (!indicatorsStore[sym][name]) indicatorsStore[sym][name] = [];
-      indicatorsStore[sym][name].push({ time: Number(time), value: Number(value) });
-    });
-  });
-
-  // Deduplicate by time, sort, trim to buffer size
-  Object.keys(indicatorsStore[sym]).forEach(name => {
-    const map = new Map();
-    indicatorsStore[sym][name].forEach(p => map.set(p.time, p.value));
-    indicatorsStore[sym][name] = Array.from(map.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([time, value]) => ({ time, value }))
-      .slice(-INDICATOR_BUFFER);
-  });
-
-  console.log(`[API] Indicator history loaded for ${sym}: ${history.length} bars`);
-  res.json({ ok: true });
+app.get('/api/dom/:symbol', (req, res) => {
+  res.json(domStore[req.params.symbol.toUpperCase()] || null);
 });
 
 // --- Candlestick bars + live positions ---
@@ -454,10 +436,20 @@ app.post('/api/account', (req, res) => {
     freeMargin:  parseFloat(body.freeMargin)  ?? accountData.freeMargin,
     marginLevel: parseFloat(body.marginLevel) ?? accountData.marginLevel,
     currency:    body.currency                || accountData.currency,
+    accountType: body.accountType             || accountData.accountType || 'demo',
     updatedAt:   new Date().toISOString(),
   };
   console.log(`[API] Account update: balance=${accountData.balance} equity=${accountData.equity} ${accountData.currency}`);
   saveAccount(accountData);
+
+  // Persist balance into goals file so it survives server restarts
+  if (accountData.balance && accountData.accountType) {
+    const goals = loadGoals();
+    const type  = accountData.accountType === 'real' ? 'real' : 'demo';
+    if (!goals[type]) goals[type] = { goalPct: 2, balance: null };
+    goals[type].balance = accountData.balance;
+    saveGoals(goals);
+  }
   // Broadcast so connected frontends update immediately
   const msg = JSON.stringify({ type: 'account', data: accountData });
   wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
@@ -467,6 +459,87 @@ app.post('/api/account', (req, res) => {
 // Frontend fetches current account state
 app.get('/api/account', (req, res) => {
   res.json(accountData);
+});
+
+// --- Trading circuit breaker ---
+const DAILY_TRADE_LIMIT    = 5;
+const CONSEC_LOSS_LIMIT    = 2;
+
+let tradingState = {
+  enabled: true,
+  disabledReason: null,   // null | string
+  consecutiveLosses: 0,
+  tradesToday: 0,
+  lastResetDate: new Date().toDateString(),
+};
+
+function broadcastTradingState() {
+  const msg = JSON.stringify({ type: 'trading_state', data: tradingState });
+  wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
+}
+
+function checkDailyReset() {
+  const today = new Date().toDateString();
+  if (tradingState.lastResetDate === today) return;
+  tradingState.lastResetDate      = today;
+  tradingState.consecutiveLosses  = 0;
+  tradingState.tradesToday        = 0;
+  if (!tradingState.enabled) {
+    tradingState.enabled        = true;
+    tradingState.disabledReason = null;
+    console.log('[Circuit] New day — trading re-enabled');
+    broadcastTradingState();
+  }
+}
+
+function applyCircuitBreaker(outcome) {
+  checkDailyReset();
+  tradingState.tradesToday++;
+  if (outcome === 'loss') tradingState.consecutiveLosses++;
+  else                    tradingState.consecutiveLosses = 0;
+
+  let reason = null;
+  if (tradingState.consecutiveLosses >= CONSEC_LOSS_LIMIT)
+    reason = `${CONSEC_LOSS_LIMIT} consecutive losses today`;
+  else if (tradingState.tradesToday >= DAILY_TRADE_LIMIT)
+    reason = `${DAILY_TRADE_LIMIT}-trade daily limit reached`;
+
+  if (reason && tradingState.enabled) {
+    tradingState.enabled        = false;
+    tradingState.disabledReason = reason;
+    console.log(`[Circuit] Trading DISABLED — ${reason}`);
+    broadcastTradingState();
+  }
+}
+
+// Rebuild state from today's closed trades on startup
+function initTradingState() {
+  const today  = new Date().toDateString();
+  const trades = loadTrades();
+  const todaysClosed = trades.closed
+    .filter(t => t.closeDate && new Date(t.closeDate).toDateString() === today)
+    .sort((a, b) => new Date(a.closeDate) - new Date(b.closeDate));
+
+  tradingState.tradesToday = todaysClosed.length;
+  tradingState.consecutiveLosses = 0;
+  for (let i = todaysClosed.length - 1; i >= 0; i--) {
+    if (todaysClosed[i].outcome === 'loss') tradingState.consecutiveLosses++;
+    else break;
+  }
+
+  if (tradingState.consecutiveLosses >= CONSEC_LOSS_LIMIT) {
+    tradingState.enabled        = false;
+    tradingState.disabledReason = `${CONSEC_LOSS_LIMIT} consecutive losses today`;
+  } else if (tradingState.tradesToday >= DAILY_TRADE_LIMIT) {
+    tradingState.enabled        = false;
+    tradingState.disabledReason = `${DAILY_TRADE_LIMIT}-trade daily limit reached`;
+  }
+  console.log(`[Circuit] Init: ${tradingState.tradesToday} trades today, ${tradingState.consecutiveLosses} consec losses, enabled=${tradingState.enabled}`);
+}
+
+app.get('/api/trading-status', (req, res) => {
+  checkDailyReset();
+  res.json(tradingState);
 });
 
 // --- Trade commands (Angular → MT5) ---
@@ -494,6 +567,10 @@ app.get('/api/commands', (req, res) => {
 
 // Angular posts a trade command here
 app.post('/api/commands', (req, res) => {
+  checkDailyReset();
+  if (!tradingState.enabled && isRealAccount()) {
+    return res.status(403).json({ error: 'Trading disabled', reason: tradingState.disabledReason });
+  }
   const cmds = loadCommands();
   const cmd = {
     id: Date.now(),
@@ -531,6 +608,32 @@ app.delete('/api/commands', (req, res) => {
 
 // Clear stale commands on startup so old unexecuted commands don't fire
 saveCommands([]);
+initTradingState();
+
+// --- Daily goals ---
+const GOALS_FILE = path.join(__dirname, 'server', 'goals.json');
+
+function loadGoals() {
+  try { return JSON.parse(fs.readFileSync(GOALS_FILE, 'utf8')); }
+  catch { return { demo: 2, real: 2 }; }
+}
+function saveGoals(data) {
+  fs.writeFileSync(GOALS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+app.get('/api/goals', (req, res) => res.json(loadGoals()));
+
+app.post('/api/goals', (req, res) => {
+  const { type, value } = req.body;
+  if ((type !== 'demo' && type !== 'real') || typeof value !== 'number') {
+    return res.status(400).json({ error: 'invalid' });
+  }
+  const goals = loadGoals();
+  if (!goals[type]) goals[type] = { goalPct: 2, balance: null };
+  goals[type].goalPct = value;
+  saveGoals(goals);
+  res.json(goals);
+});
 
 // --- Start server ---
 server.listen(PORT, () => {

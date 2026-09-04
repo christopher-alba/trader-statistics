@@ -4,6 +4,7 @@ import { RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { WebSocketService } from './services/websocket.service';
 import { TradeService } from './services/trade.service';
+import { ClosedTrade } from './models/trade.model';
 
 @Component({
   selector: 'app-root',
@@ -20,11 +21,52 @@ export class App implements OnInit, OnDestroy {
   accountFreeMargin: number | null = null;
   accountMarginLevel: number | null = null;
   accountCurrency: string | null = null;
+  goalTargetPct = 2;
+  private closedTrades: ClosedTrade[] = [];
   private subs = new Subscription();
+
+  private get todayDateStr(): string {
+    return new Date().toLocaleDateString('en-CA');
+  }
+
+  private parseDate(str: string): Date {
+    if (!str) return new Date(NaN);
+    if (/^\d{4}\./.test(str))
+      return new Date(str.replace(/^(\d{4})\.(\d{2})\.(\d{2})\s/, '$1-$2-$3T') + 'Z');
+    return new Date(str);
+  }
+
+  get todayNetPnL(): number {
+    const today = this.todayDateStr;
+    return this.closedTrades
+      .filter(t => {
+        const d = this.parseDate(t.closeDate);
+        return !isNaN(d.getTime()) && d.toLocaleDateString('en-CA') === today;
+      })
+      .reduce((s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+  }
+
+  get todayGoalTarget(): number {
+    if (!this.accountBalance) return 0;
+    const startBal = Math.max(0, this.accountBalance - this.todayNetPnL);
+    return startBal * (this.goalTargetPct / 100);
+  }
+
+  get todayGoalProgress(): number {
+    if (!this.todayGoalTarget) return 0;
+    return Math.min(100, Math.max(0, (this.todayNetPnL / this.todayGoalTarget) * 100));
+  }
+
+  get todayGoalMet(): boolean {
+    return this.todayGoalTarget > 0 && this.todayNetPnL >= this.todayGoalTarget;
+  }
 
   constructor(private wsService: WebSocketService, private tradeService: TradeService, private cdr: ChangeDetectorRef) {}
 
   ngOnInit(): void {
+    const saved = localStorage.getItem('trader_dailyGoalPct');
+    if (saved) this.goalTargetPct = parseFloat(saved) || 2;
+
     this.wsService.connect();
     this.subs.add(
       this.wsService.connected$.subscribe(v => this.wsConnected = v)
@@ -49,6 +91,12 @@ export class App implements OnInit, OnDestroy {
         this.cdr.detectChanges();
       })
     );
+    this.subs.add(
+      this.wsService.messages$.subscribe(data => {
+        this.closedTrades = data.closed;
+        this.cdr.detectChanges();
+      })
+    );
     this.tradeService.getAccount().subscribe({
       next: a => {
         if (a.balance !== null) {
@@ -60,6 +108,10 @@ export class App implements OnInit, OnDestroy {
           this.accountCurrency    = a.currency;
         }
       },
+      error: () => {},
+    });
+    this.tradeService.getTrades().subscribe({
+      next: data => { this.closedTrades = data.closed; this.cdr.detectChanges(); },
       error: () => {},
     });
   }

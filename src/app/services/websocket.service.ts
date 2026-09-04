@@ -1,5 +1,15 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { Observable, ReplaySubject, BehaviorSubject, Subject } from 'rxjs';
+
+export interface DOMLevel { price: number; volume: number; }
+export interface DOMData  { symbol: string; bids: DOMLevel[]; asks: DOMLevel[]; }
+
+export interface TradingState {
+  enabled: boolean;
+  disabledReason: string | null;
+  consecutiveLosses: number;
+  tradesToday: number;
+}
 import { TradeData } from '../models/trade.model';
 
 export interface AccountData {
@@ -9,6 +19,7 @@ export interface AccountData {
   freeMargin: number | null;
   marginLevel: number | null;
   currency: string | null;
+  accountType: 'demo' | 'real' | null;
   updatedAt: string | null;
 }
 
@@ -35,12 +46,6 @@ export interface BarUpdate {
   secsLeft: number | null;
 }
 
-export interface IndicatorUpdate {
-  symbol: string;
-  time: number;
-  indicators: Record<string, number>;
-}
-
 export interface Position {
   ticket: number;
   symbol: string;
@@ -64,7 +69,8 @@ export class WebSocketService implements OnDestroy {
   private priceSubject = new Subject<PriceData>();
   private barUpdateSubject = new Subject<BarUpdate>();
   private positionsSubject = new ReplaySubject<Position[]>(1);
-  private indicatorSubject = new Subject<IndicatorUpdate>();
+  private domSubject = new Subject<DOMData>();
+  private tradingStateSubject = new ReplaySubject<TradingState>(1);
   private connectedSubject = new BehaviorSubject<boolean>(false);
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
@@ -74,7 +80,8 @@ export class WebSocketService implements OnDestroy {
   price$: Observable<PriceData> = this.priceSubject.asObservable();
   barUpdate$: Observable<BarUpdate> = this.barUpdateSubject.asObservable();
   positions$: Observable<Position[]> = this.positionsSubject.asObservable();
-  indicatorUpdate$: Observable<IndicatorUpdate> = this.indicatorSubject.asObservable();
+  dom$: Observable<DOMData> = this.domSubject.asObservable();
+  tradingState$: Observable<TradingState> = this.tradingStateSubject.asObservable();
   connected$: Observable<boolean> = this.connectedSubject.asObservable();
 
   connect(): void {
@@ -104,8 +111,10 @@ export class WebSocketService implements OnDestroy {
             this.barUpdateSubject.next(parsed.data as BarUpdate);
           } else if (parsed.type === 'positions' && parsed.data) {
             this.positionsSubject.next(parsed.data as Position[]);
-          } else if (parsed.type === 'indicator_update' && parsed.data) {
-            this.indicatorSubject.next(parsed.data as IndicatorUpdate);
+          } else if (parsed.type === 'dom' && parsed.data) {
+            this.domSubject.next(parsed.data as DOMData);
+          } else if (parsed.type === 'trading_state' && parsed.data) {
+            this.tradingStateSubject.next(parsed.data as TradingState);
           }
         } catch (e) {
           console.error('[WS] Failed to parse message:', e);

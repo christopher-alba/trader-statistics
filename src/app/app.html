@@ -43,6 +43,18 @@
           {{ accountMarginLevel | number:'1.2-2' }}%
         </span>
       </div>
+      <div class="account-stat goal-nav-stat">
+        <span class="balance-label">Daily Goal</span>
+        <span class="balance-value" [class.equity-pos]="todayGoalMet" [class.goal-nav-progress]="!todayGoalMet">
+          {{ todayGoalProgress | number:'1.0-0' }}%
+          <span class="goal-nav-met" *ngIf="todayGoalMet">✓</span>
+        </span>
+        <div class="goal-nav-bar-wrap">
+          <div class="goal-nav-bar-fill"
+            [style.width.%]="todayGoalProgress"
+            [class.goal-nav-bar-fill--met]="todayGoalMet"></div>
+        </div>
+      </div>
     </div>
 
     <!-- WS Status -->

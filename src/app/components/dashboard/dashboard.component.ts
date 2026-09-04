@@ -29,9 +29,59 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('pnlChart') pnlChartRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('donutChart') donutChartRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('riskChart') riskChartRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('forecastChart') forecastChartRef!: ElementRef<HTMLCanvasElement>;
+
+  activeTab: 'demo' | 'real' | 'compare' = 'demo';
 
   openTrades: OpenTrade[] = [];
   closedTrades: ClosedTrade[] = [];
+
+  // Compare tab data
+  demoTrades:  ClosedTrade[] = [];
+  realTrades:  ClosedTrade[] = [];
+
+  switchTab(tab: 'demo' | 'real' | 'compare'): void {
+    this.activeTab = tab;
+    this.accountBalance = 0; // reset so stored goal balance takes effect
+    this.loadGoals();
+    if (tab === 'compare') {
+      this.tradeService.getTrades('demo').subscribe(d => { this.demoTrades = d.closed; this.cdr.detectChanges(); });
+      this.tradeService.getTrades('real').subscribe(d => { this.realTrades = d.closed; this.cdr.detectChanges(); });
+    } else {
+      this.tradeService.getTrades(tab).subscribe(data => {
+        this.openTrades  = data.open;
+        this.closedTrades = data.closed;
+        this.page = 1;
+        this.updateCharts();
+        this.cdr.detectChanges();
+      });
+    }
+  }
+
+  private closedStats(trades: ClosedTrade[]): {
+    winRate: string; netPnL: number; avgWin: number; avgLoss: number; total: number;
+  } {
+    const wins   = trades.filter(t => t.outcome === 'win');
+    const losses = trades.filter(t => t.outcome === 'loss');
+    const netPnL = trades.reduce((s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+    return {
+      total:   trades.length,
+      winRate: trades.length ? Math.round(wins.length / trades.length * 100) + '%' : '0%',
+      netPnL,
+      avgWin:  wins.length   ? wins.reduce((s, t)   => s + t.amount, 0) / wins.length   : 0,
+      avgLoss: losses.length ? losses.reduce((s, t) => s + t.amount, 0) / losses.length : 0,
+    };
+  }
+
+  get demoStats()  { return this.closedStats(this.demoTrades); }
+  get realStats()  { return this.closedStats(this.realTrades); }
+
+  // Daily goal
+  accountBalance = 0;
+  goalTargetPct = 2;
+  private liveAccountType: 'demo' | 'real' | null = null;
+  showGoalSettings = false;
+  goalSettingInput = 2;
 
   // Form model
   form = {
@@ -64,6 +114,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   private pnlChart: Chart | null = null;
   private donutChart: Chart | null = null;
   private riskChart: Chart | null = null;
+  private forecastChart: Chart | null = null;
   private subs = new Subscription();
   private clockInterval: ReturnType<typeof setInterval> | null = null;
   private chartsInitialized = false;
@@ -75,14 +126,39 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     private cdr: ChangeDetectorRef
   ) {}
 
+  private activeGoalType(): 'demo' | 'real' {
+    return this.activeTab === 'real' ? 'real' : 'demo';
+  }
+
+  private loadGoals(): void {
+    this.tradeService.getGoals().subscribe({
+      next: goals => {
+        const entry        = goals[this.activeGoalType()];
+        this.goalTargetPct    = entry?.goalPct ?? 2;
+        this.goalSettingInput = this.goalTargetPct;
+        // Always use the stored balance for this tab unless the live account matches
+        if (entry?.balance && this.liveAccountType !== this.activeGoalType()) {
+          this.accountBalance = entry.balance;
+        } else if (entry?.balance && !this.accountBalance) {
+          this.accountBalance = entry.balance;
+        }
+        this.updateForecastChart();
+        this.cdr.detectChanges();
+      },
+      error: () => {},
+    });
+  }
+
   ngOnInit(): void {
+
     this.updateOpenDate();
     this.clockInterval = setInterval(() => this.updateOpenDate(), 60000);
 
-    // Live updates
+    // Live updates — only apply to the matching active tab
     this.subs.add(
       this.wsService.messages$.subscribe((data: TradeData) => {
-        this.openTrades = data.open;
+        if (this.activeTab === 'compare') return;
+        this.openTrades  = data.open;
         this.closedTrades = data.closed;
         this.page = 1;
         this.updateCharts();
@@ -106,12 +182,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.initCharts();
     this.chartsInitialized = true;
 
-    // Always fetch from disk — don't rely solely on WebSocket events
-    this.tradeService.getTrades().subscribe((data) => {
-      this.openTrades = data.open;
-      this.closedTrades = data.closed;
-      this.updateCharts();
-      this.cdr.detectChanges();
+    // Initial load for the default tab
+    this.switchTab(this.activeTab);
+    this.loadGoals();
+
+    this.tradeService.getAccount().subscribe((acc) => {
+      if (acc.accountType) this.liveAccountType = acc.accountType as 'demo' | 'real';
+      if (acc.balance && (!acc.accountType || acc.accountType === this.activeGoalType())) {
+        this.accountBalance = acc.balance;
+        this.updateForecastChart();
+        this.cdr.detectChanges();
+      }
     });
   }
 
@@ -158,6 +239,92 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const all = [...this.openTrades, ...this.closedTrades];
     if (!all.length) return 0;
     return all.reduce((s, t) => s + (t.riskPct || 0), 0) / all.length;
+  }
+
+  // --- Daily goal ---
+  get todayDateStr(): string {
+    return new Date().toLocaleDateString('en-CA');
+  }
+
+  get todayNetPnL(): number {
+    const today = this.todayDateStr;
+    return this.closedTrades
+      .filter(t => {
+        const d = this.parseDate(t.closeDate);
+        return !isNaN(d.getTime()) && d.toLocaleDateString('en-CA') === today;
+      })
+      .reduce((s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+  }
+
+  get todayStartBalance(): number {
+    return Math.max(0, this.accountBalance - this.todayNetPnL);
+  }
+
+  get todayGoalTarget(): number {
+    return this.todayStartBalance * (this.goalTargetPct / 100);
+  }
+
+  get todayGoalProgress(): number {
+    if (!this.todayGoalTarget) return 0;
+    return Math.min(100, Math.max(0, (this.todayNetPnL / this.todayGoalTarget) * 100));
+  }
+
+  get todayGoalMet(): boolean {
+    return this.todayGoalTarget > 0 && this.todayNetPnL >= this.todayGoalTarget;
+  }
+
+  private getDailyStats(): { date: string; netPnL: number; startBalance: number; goalMet: boolean }[] {
+    if (!this.accountBalance || !this.closedTrades.length) return [];
+
+    const allTimeNet = this.closedTrades.reduce(
+      (s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+    let running = this.accountBalance - allTimeNet;
+
+    const sorted = [...this.closedTrades].sort((a, b) => {
+      const ta = this.parseDate(a.closeDate).getTime();
+      const tb = this.parseDate(b.closeDate).getTime();
+      return (isNaN(ta) ? Infinity : ta) - (isNaN(tb) ? Infinity : tb);
+    });
+
+    const byDay = new Map<string, ClosedTrade[]>();
+    for (const t of sorted) {
+      const d = this.parseDate(t.closeDate);
+      if (isNaN(d.getTime())) continue;
+      const day = d.toLocaleDateString('en-CA');
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day)!.push(t);
+    }
+
+    const result: { date: string; netPnL: number; startBalance: number; goalMet: boolean }[] = [];
+    for (const [date, trades] of byDay) {
+      const startBalance = running;
+      const dayNet = trades.reduce((s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+      const target = startBalance * (this.goalTargetPct / 100);
+      result.push({ date, netPnL: dayNet, startBalance, goalMet: startBalance > 0 && dayNet >= target });
+      running += dayNet;
+    }
+    return result;
+  }
+
+  get goalMetCount(): number {
+    return this.getDailyStats().filter(d => d.goalMet).length;
+  }
+
+  get totalTradingDays(): number {
+    return this.getDailyStats().length;
+  }
+
+  get goalHitRate(): string {
+    const total = this.totalTradingDays;
+    if (!total) return '0%';
+    return Math.round((this.goalMetCount / total) * 100) + '%';
+  }
+
+  saveGoalSettings(): void {
+    this.goalTargetPct = this.goalSettingInput || 2;
+    this.tradeService.saveGoal(this.activeGoalType(), this.goalTargetPct).subscribe({ error: () => {} });
+    this.showGoalSettings = false;
+    this.updateCharts();
   }
 
   // --- Form submit ---
@@ -231,12 +398,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.createPnLChart();
     this.createDonutChart();
     this.createRiskChart();
+    this.createForecastChart();
   }
 
   private destroyCharts(): void {
-    this.pnlChart?.destroy();   this.pnlChart = null;
-    this.donutChart?.destroy(); this.donutChart = null;
-    this.riskChart?.destroy();  this.riskChart = null;
+    this.pnlChart?.destroy();      this.pnlChart = null;
+    this.donutChart?.destroy();    this.donutChart = null;
+    this.riskChart?.destroy();     this.riskChart = null;
+    this.forecastChart?.destroy(); this.forecastChart = null;
   }
 
   private updateCharts(): void {
@@ -244,6 +413,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.updatePnLChart();
     this.updateDonutChart();
     this.updateRiskChart();
+    this.updateForecastChart();
   }
 
   private parseDate(str: string): Date {
@@ -375,6 +545,114 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.riskChart.data.labels = this.closedTrades.map(t => t.instrument);
     this.riskChart.data.datasets[0].data = this.closedTrades.map(t => t.riskPct);
     this.riskChart.update();
+  }
+
+  private buildForecastData(): { labels: string[]; currentPace: number[]; goalPace: number[]; avgDailyPct: number } {
+    const currentBalance = this.accountBalance;
+    if (!currentBalance) return { labels: [], currentPace: [], goalPace: [], avgDailyPct: 0 };
+
+    const stats = this.getDailyStats();
+
+    // Average daily % gain (compounding basis)
+    const avgDailyPct = stats.length
+      ? stats.reduce((s, d) => s + (d.startBalance > 0 ? (d.netPnL / d.startBalance) * 100 : 0), 0) / stats.length
+      : 0;
+
+    let tradingDaysPerMonth = 20;
+    if (stats.length >= 2) {
+      const firstDate = new Date(stats[0].date);
+      const lastDate  = new Date(stats[stats.length - 1].date);
+      const calMonths = Math.max(1,
+        (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44));
+      tradingDaysPerMonth = Math.max(1, Math.round(stats.length / calMonths));
+    }
+
+    const labels = ['Now'];
+    const currentPace = [+currentBalance.toFixed(2)];
+    const goalPace    = [+currentBalance.toFixed(2)];
+    let balCurrent = currentBalance;
+    let balGoal    = currentBalance;
+    const today = new Date();
+
+    for (let m = 1; m <= 12; m++) {
+      const d = new Date(today.getFullYear(), today.getMonth() + m, 1);
+      labels.push(d.toLocaleString('en-NZ', { month: 'short', year: '2-digit' }));
+      for (let day = 0; day < tradingDaysPerMonth; day++) {
+        balCurrent *= 1 + avgDailyPct / 100;
+        balGoal    *= 1 + this.goalTargetPct / 100;
+      }
+      currentPace.push(+balCurrent.toFixed(2));
+      goalPace.push(+balGoal.toFixed(2));
+    }
+
+    return { labels, currentPace, goalPace, avgDailyPct };
+  }
+
+  private createForecastChart(): void {
+    if (!this.forecastChartRef) return;
+    const { labels, currentPace, goalPace, avgDailyPct } = this.buildForecastData();
+    const goalLabel    = `At daily goal (${this.goalTargetPct}%/day)`;
+    const currentLabel = `At current pace (${avgDailyPct >= 0 ? '+' : ''}${avgDailyPct.toFixed(2)}%/day compounded)`;
+    this.forecastChart = new Chart(this.forecastChartRef.nativeElement, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: currentLabel,
+            data: currentPace,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,0.08)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+          },
+          {
+            label: goalLabel,
+            data: goalPace,
+            borderColor: '#22c55e',
+            backgroundColor: 'rgba(34,197,94,0.06)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+            borderDash: [6, 3],
+          } as any,
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${this.formatCurrency(ctx.parsed.y ?? 0)}`,
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#64748b' }, grid: { color: '#2a3347' } },
+          y: {
+            ticks: {
+              color: '#64748b',
+              callback: (v) => 'NZD ' + Number(v).toFixed(0),
+            },
+            grid: { color: '#2a3347' },
+          },
+        },
+      },
+    });
+  }
+
+  private updateForecastChart(): void {
+    if (!this.forecastChart) return;
+    const { labels, currentPace, goalPace, avgDailyPct } = this.buildForecastData();
+    this.forecastChart.data.labels = labels;
+    this.forecastChart.data.datasets[0].data  = currentPace;
+    this.forecastChart.data.datasets[0].label = `At current pace (${avgDailyPct >= 0 ? '+' : ''}${avgDailyPct.toFixed(2)}%/day compounded)`;
+    this.forecastChart.data.datasets[1].data  = goalPace;
+    this.forecastChart.data.datasets[1].label = `At daily goal (${this.goalTargetPct}%/day)`;
+    this.forecastChart.update();
   }
 
   formatCurrency(val: number): string {
