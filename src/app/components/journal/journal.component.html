@@ -1,92 +1,285 @@
 <div class="journal">
   <div class="journal-header">
     <h2 class="page-title">Trade Journal</h2>
-    <div class="journal-controls">
-      <input
-        type="text"
-        [(ngModel)]="searchText"
-        placeholder="Search instrument or notes..."
-        class="input search-input"
-      />
-      <select [(ngModel)]="outcomeFilter" class="input select-input">
-        <option value="all">All Trades</option>
-        <option value="open">Open Only</option>
-        <option value="win">Wins Only</option>
-        <option value="loss">Losses Only</option>
-      </select>
-      <select [(ngModel)]="sortBy" class="input select-input">
-        <option value="date-desc">Newest First</option>
-        <option value="date-asc">Oldest First</option>
-        <option value="pnl">Best P&amp;L</option>
-        <option value="risk">Highest Risk</option>
-      </select>
+    <div class="journal-tabs">
+      <button class="journal-tab" [class.active]="activeTab === 'demo'" (click)="switchTab('demo')">Demo</button>
+      <button class="journal-tab" [class.active]="activeTab === 'real'" (click)="switchTab('real')">Real</button>
     </div>
   </div>
 
-  <div class="empty-state" *ngIf="!filteredTrades.length">
-    No trades match your filters.
-  </div>
+  <div class="journal-columns">
 
-  <div class="cards-grid">
-    <div
-      class="note-card"
-      [class]="cardClass(trade)"
-      *ngFor="let trade of filteredTrades"
-    >
-      <div class="card-header">
-        <span class="card-instrument">
-          {{ trade.instrument }}
-          <span class="badge badge-mt5" *ngIf="trade.source === 'mt5'">MT5</span>
-        </span>
-        <span *ngIf="!trade.isClosed" class="badge badge-open">OPEN</span>
-        <span *ngIf="trade.isClosed && asClosed(trade).outcome === 'win'" class="badge badge-win">WIN</span>
-        <span *ngIf="trade.isClosed && asClosed(trade).outcome === 'loss'" class="badge badge-loss">LOSS</span>
+    <!-- ===== LEFT: Journal Entries ===== -->
+    <div class="journal-col">
+      <div class="col-header">
+        <div class="col-title-row">
+          <span class="col-title">Session Entries</span>
+          <button class="btn btn-primary btn-sm" (click)="openNewEntryForm()">+ New Entry</button>
+        </div>
+        <div class="col-controls">
+          <input
+            type="text"
+            [(ngModel)]="entrySearch"
+            placeholder="Search entries..."
+            class="input col-search"
+          />
+          <select [(ngModel)]="entrySortBy" class="input col-select">
+            <option value="date-desc">Newest First</option>
+            <option value="date-asc">Oldest First</option>
+          </select>
+        </div>
       </div>
 
-      <div class="card-dates">
-        <span>Opened: {{ formatDate(trade.openDate) }}</span>
-        <span *ngIf="trade.isClosed">Closed: {{ formatDate(asClosed(trade).closeDate) }}</span>
+      <!-- New entry form -->
+      <div class="new-entry-form" *ngIf="showNewEntryForm">
+        <div class="new-entry-header">New Session Entry</div>
+        <div class="form-field-label">Title</div>
+        <input
+          type="text"
+          [(ngModel)]="newEntryTitle"
+          placeholder="e.g. DAY 1 — Morning Session"
+          class="input"
+        />
+        <div class="form-field-label">Reflection <span class="field-required">*</span></div>
+        <textarea
+          [(ngModel)]="newEntryBody"
+          placeholder="Reflect on the session — what worked, what didn't, how you felt..."
+          class="input entry-textarea"
+          rows="4"
+        ></textarea>
+        <div class="form-field-label">Notes</div>
+        <textarea
+          [(ngModel)]="newEntryNotes"
+          placeholder="Quick bullet points, reminders, or observations..."
+          class="input entry-textarea entry-textarea--short"
+          rows="3"
+        ></textarea>
+        <div class="form-actions">
+          <button class="btn btn-primary btn-sm" (click)="saveNewEntry()" [disabled]="!newEntryBody.trim()">Save Entry</button>
+          <button class="btn btn-secondary btn-sm" (click)="cancelNewEntry()">Cancel</button>
+        </div>
       </div>
 
-      <div class="stats-strip">
-        <div class="stat-item" *ngIf="trade.source === 'mt5'">
-          <span class="stat-name">Volume</span>
-          <span class="stat-val">{{ trade.volume || trade.investmentSize }} lots</span>
+      <div class="col-empty" *ngIf="!filteredEntries.length && !showNewEntryForm">
+        No entries yet. Click <strong>+ New Entry</strong> to reflect on your session.
+      </div>
+
+      <div class="entry-list">
+        <div
+          class="note-card card--journal"
+          [class.card--selected]="selectedEntry?.id === entry.id"
+          (click)="selectEntry(entry)"
+          *ngFor="let entry of filteredEntries"
+        >
+          <!-- View mode -->
+          <ng-container *ngIf="editingEntryId !== entry.id">
+            <div class="card-header">
+              <span class="card-instrument entry-title">
+                {{ entry.title || 'Session Reflection' }}
+              </span>
+              <span class="badge badge-journal">ENTRY</span>
+            </div>
+            <div class="card-dates">
+              <span>{{ formatDate(entry.date) }}</span>
+            </div>
+            <div class="entry-body">{{ entry.body }}</div>
+            <div class="entry-notes" *ngIf="entry.notes">
+              <span class="notes-label">Notes</span>
+              <div class="entry-notes-text">{{ entry.notes }}</div>
+            </div>
+            <div class="entry-actions">
+              <button class="btn btn-secondary btn-sm" (click)="startEdit(entry, $event)">Edit</button>
+              <button class="btn btn-danger btn-sm" (click)="deleteEntry(entry, $event)">Delete</button>
+            </div>
+            <div class="entry-day-hint" *ngIf="selectedEntry?.id !== entry.id">
+              Click to see that day's trades →
+            </div>
+            <div class="entry-day-hint entry-day-hint--active" *ngIf="selectedEntry?.id === entry.id">
+              Showing trades for this day ✓
+            </div>
+          </ng-container>
+
+          <!-- Edit mode -->
+          <ng-container *ngIf="editingEntryId === entry.id">
+            <div class="new-entry-header">Edit Entry</div>
+            <div class="form-field-label">Title</div>
+            <input
+              type="text"
+              [(ngModel)]="editTitle"
+              placeholder="Title (optional)"
+              class="input"
+              (click)="$event.stopPropagation()"
+            />
+            <div class="form-field-label">Reflection <span class="field-required">*</span></div>
+            <textarea
+              [(ngModel)]="editBody"
+              class="input entry-textarea"
+              rows="4"
+              (click)="$event.stopPropagation()"
+            ></textarea>
+            <div class="form-field-label">Notes</div>
+            <textarea
+              [(ngModel)]="editNotes"
+              placeholder="Quick bullet points, reminders..."
+              class="input entry-textarea entry-textarea--short"
+              rows="3"
+              (click)="$event.stopPropagation()"
+            ></textarea>
+            <div class="form-actions" (click)="$event.stopPropagation()">
+              <button class="btn btn-primary btn-sm" (click)="saveEdit(entry)" [disabled]="!editBody.trim()">Save</button>
+              <button class="btn btn-secondary btn-sm" (click)="cancelEdit()">Cancel</button>
+            </div>
+          </ng-container>
+
         </div>
-        <div class="stat-item" *ngIf="trade.source !== 'mt5'">
-          <span class="stat-name">Invested</span>
-          <span class="stat-val">{{ formatCurrency(trade.investmentSize || 0) }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-name">Risk %</span>
-          <span class="stat-val">{{ trade.riskPct | number:'1.2-2' }}%</span>
-        </div>
-        <div class="stat-item" *ngIf="trade.source === 'mt5' && trade.slPrice">
-          <span class="stat-name">SL</span>
-          <span class="stat-val">{{ trade.slPrice | number:'1.2-2' }}</span>
-        </div>
-        <div class="stat-item" *ngIf="trade.source !== 'mt5'">
-          <span class="stat-name">Risk (NZD)</span>
-          <span class="stat-val">{{ formatCurrency(trade.riskNzd) }}</span>
-        </div>
-        <div class="stat-item" *ngIf="trade.isClosed">
-          <span class="stat-name">P&amp;L</span>
-          <span class="stat-val" [class.win]="pnl(trade) >= 0" [class.loss]="pnl(trade) < 0">
-            {{ pnl(trade) >= 0 ? '+' : '' }}{{ formatCurrency(pnl(trade)) }}
+      </div>
+    </div>
+
+    <!-- ===== RIGHT: Trades ===== -->
+    <div class="journal-col">
+      <div class="col-header">
+        <div class="col-title-row">
+          <span class="col-title">
+            <ng-container *ngIf="!selectedEntry">Trades</ng-container>
+            <ng-container *ngIf="selectedEntry">
+              Trades — {{ formatDate(selectedEntry.date) }}
+            </ng-container>
           </span>
+          <div class="col-title-right">
+            <span class="trade-count">{{ filteredTrades.length }}</span>
+            <button class="btn btn-secondary btn-sm clear-btn" *ngIf="selectedEntry" (click)="clearSelection()">
+              ✕ All Trades
+            </button>
+          </div>
         </div>
-        <div class="stat-item" *ngIf="trade.isClosed">
-          <span class="stat-name">R:R</span>
-          <span class="stat-val">{{ rr(trade) }}</span>
+        <div class="col-controls">
+          <input
+            type="text"
+            [(ngModel)]="tradeSearch"
+            placeholder="Search instrument, notes..."
+            class="input col-search"
+          />
+          <select [(ngModel)]="outcomeFilter" class="input col-select">
+            <option value="all">All Trades</option>
+            <option value="open">Open Only</option>
+            <option value="win">Wins Only</option>
+            <option value="loss">Losses Only</option>
+          </select>
+          <select [(ngModel)]="tradeSortBy" class="input col-select">
+            <option value="date-desc">Newest First</option>
+            <option value="date-asc">Oldest First</option>
+            <option value="pnl">Best P&amp;L</option>
+            <option value="risk">Highest Risk</option>
+          </select>
         </div>
       </div>
 
-      <div class="card-notes" *ngIf="trade.notes">
-        <span class="notes-label">Entry:</span> {{ trade.notes }}
+      <div class="col-empty" *ngIf="!filteredTrades.length">
+        <ng-container *ngIf="selectedEntry">No trades found for {{ formatDate(selectedEntry.date) }}.</ng-container>
+        <ng-container *ngIf="!selectedEntry">No trades match your filters.</ng-container>
       </div>
-      <div class="card-notes exit-notes" *ngIf="trade.isClosed && asClosed(trade).closeNotes">
-        <span class="notes-label">Exit:</span> {{ asClosed(trade).closeNotes }}
+
+      <div class="trades-grid">
+        <div
+          class="note-card"
+          [class]="cardClass(trade)"
+          *ngFor="let trade of filteredTrades"
+        >
+          <!-- Static info always shown -->
+          <div class="card-header">
+            <span class="card-instrument">
+              {{ trade.instrument }}
+              <span class="badge badge-mt5" *ngIf="trade.source === 'mt5'">MT5</span>
+            </span>
+            <span *ngIf="!trade.isClosed" class="badge badge-open">OPEN</span>
+            <span *ngIf="trade.isClosed && asClosed(trade).outcome === 'win'" class="badge badge-win">WIN</span>
+            <span *ngIf="trade.isClosed && asClosed(trade).outcome === 'loss'" class="badge badge-loss">LOSS</span>
+          </div>
+
+          <div class="card-dates">
+            <span>Opened: {{ formatDateTime(trade.openDate) }}</span>
+            <span *ngIf="trade.isClosed">Closed: {{ formatDateTime(asClosed(trade).closeDate) }}</span>
+          </div>
+
+          <div class="stats-strip">
+            <div class="stat-item" *ngIf="trade.source === 'mt5'">
+              <span class="stat-name">Volume</span>
+              <span class="stat-val">{{ trade.volume || trade.investmentSize }} lots</span>
+            </div>
+            <div class="stat-item" *ngIf="trade.source !== 'mt5'">
+              <span class="stat-name">Invested</span>
+              <span class="stat-val">{{ formatCurrency(trade.investmentSize || 0) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-name">Risk %</span>
+              <span class="stat-val">{{ trade.riskPct | number:'1.2-2' }}%</span>
+            </div>
+            <div class="stat-item" *ngIf="trade.source === 'mt5' && trade.slPrice">
+              <span class="stat-name">SL</span>
+              <span class="stat-val">{{ trade.slPrice | number:'1.2-2' }}</span>
+            </div>
+            <div class="stat-item" *ngIf="trade.source !== 'mt5'">
+              <span class="stat-name">Risk (NZD)</span>
+              <span class="stat-val">{{ formatCurrency(trade.riskNzd) }}</span>
+            </div>
+            <div class="stat-item" *ngIf="trade.isClosed">
+              <span class="stat-name">P&amp;L</span>
+              <span class="stat-val" [class.win]="pnl(trade) >= 0" [class.loss]="pnl(trade) < 0">
+                {{ pnl(trade) >= 0 ? '+' : '' }}{{ formatCurrency(pnl(trade)) }}
+              </span>
+            </div>
+            <div class="stat-item" *ngIf="trade.isClosed">
+              <span class="stat-name">R:R</span>
+              <span class="stat-val">{{ rr(trade) }}</span>
+            </div>
+            <div class="stat-item" *ngIf="trade.isClosed">
+              <span class="stat-name">Duration</span>
+              <span class="stat-val">{{ tradeDuration(trade) }}</span>
+            </div>
+          </div>
+
+          <!-- View mode notes -->
+          <ng-container *ngIf="editingTradeId !== trade.id">
+            <div class="card-notes" *ngIf="trade.notes">
+              <span class="notes-label">Entry:</span> {{ trade.notes }}
+            </div>
+            <div class="card-notes exit-notes" *ngIf="trade.isClosed && asClosed(trade).closeNotes">
+              <span class="notes-label">Exit:</span> {{ asClosed(trade).closeNotes }}
+            </div>
+            <div class="trade-edit-row">
+              <button class="btn btn-secondary btn-sm" (click)="startEditTrade(trade, $event)">Edit Notes</button>
+            </div>
+          </ng-container>
+
+          <!-- Edit mode notes -->
+          <ng-container *ngIf="editingTradeId === trade.id">
+            <div class="trade-notes-edit">
+              <div class="form-field-label">Entry Notes</div>
+              <textarea
+                [(ngModel)]="editTradeNotes"
+                placeholder="Pre-trade thoughts, setup, reasoning..."
+                class="input entry-textarea entry-textarea--short"
+                rows="2"
+              ></textarea>
+              <ng-container *ngIf="trade.isClosed">
+                <div class="form-field-label">Exit Notes</div>
+                <textarea
+                  [(ngModel)]="editTradeCloseNotes"
+                  placeholder="How the trade played out, lessons learned..."
+                  class="input entry-textarea entry-textarea--short"
+                  rows="2"
+                ></textarea>
+              </ng-container>
+              <div class="form-actions">
+                <button class="btn btn-primary btn-sm" (click)="saveEditTrade(trade)">Save</button>
+                <button class="btn btn-secondary btn-sm" (click)="cancelEditTrade()">Cancel</button>
+              </div>
+            </div>
+          </ng-container>
+
+        </div>
       </div>
     </div>
+
   </div>
 </div>

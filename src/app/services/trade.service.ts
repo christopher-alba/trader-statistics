@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { TradeData, OpenTrade, ClosedTrade } from '../models/trade.model';
+import { TradeData, OpenTrade, ClosedTrade, JournalEntry } from '../models/trade.model';
 
 const BASE = 'http://localhost:3000/api';
 
@@ -27,6 +27,10 @@ export class TradeService {
     closeNotes?: string;
   }): Observable<ClosedTrade> {
     return this.http.post<ClosedTrade>(`${BASE}/trade/close`, payload);
+  }
+
+  updateTradeNotes(id: number, notes: string, closeNotes?: string): Observable<any> {
+    return this.http.patch(`${BASE}/trade/${id}/notes`, { notes, closeNotes });
   }
 
   deleteTrade(id: number): Observable<{ deleted: boolean }> {
@@ -79,5 +83,21 @@ export class TradeService {
 
   saveGoal(type: 'demo' | 'real', value: number): Observable<any> {
     return this.http.post<any>(`${BASE}/goals`, { type, value });
+  }
+
+  getJournalEntries(type: 'demo' | 'real'): Observable<JournalEntry[]> {
+    return this.http.get<JournalEntry[]>(`${BASE}/journal/${type}`);
+  }
+
+  createJournalEntry(payload: { title: string; body: string; notes: string }, type: 'demo' | 'real'): Observable<JournalEntry> {
+    return this.http.post<JournalEntry>(`${BASE}/journal?type=${type}`, payload);
+  }
+
+  updateJournalEntry(id: number, payload: { title: string; body: string; notes: string }, type: 'demo' | 'real'): Observable<JournalEntry> {
+    return this.http.patch<JournalEntry>(`${BASE}/journal/${id}?type=${type}`, payload);
+  }
+
+  deleteJournalEntry(id: number, type: 'demo' | 'real'): Observable<{ deleted: boolean }> {
+    return this.http.delete<{ deleted: boolean }>(`${BASE}/journal/${id}?type=${type}`);
   }
 }

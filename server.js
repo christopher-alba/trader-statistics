@@ -188,6 +188,35 @@ app.post('/api/trade/close', (req, res) => {
   res.json(closedTrade);
 });
 
+// PATCH trade notes (entry notes + close notes)
+app.patch('/api/trade/:id/notes', (req, res) => {
+  const trades = loadTrades();
+  const id = parseInt(req.params.id, 10);
+  const { notes, closeNotes } = req.body;
+
+  const openIdx = trades.open.findIndex(t => t.id === id);
+  if (openIdx !== -1) {
+    trades.open[openIdx] = { ...trades.open[openIdx], notes: notes ?? trades.open[openIdx].notes };
+    saveTrades(trades);
+    broadcast(trades);
+    return res.json(trades.open[openIdx]);
+  }
+
+  const closedIdx = trades.closed.findIndex(t => t.id === id);
+  if (closedIdx !== -1) {
+    trades.closed[closedIdx] = {
+      ...trades.closed[closedIdx],
+      notes:      notes      ?? trades.closed[closedIdx].notes,
+      closeNotes: closeNotes ?? trades.closed[closedIdx].closeNotes,
+    };
+    saveTrades(trades);
+    broadcast(trades);
+    return res.json(trades.closed[closedIdx]);
+  }
+
+  res.status(404).json({ error: 'Trade not found' });
+});
+
 // DELETE a single trade (open or closed)
 app.delete('/api/trade/:id', (req, res) => {
   const trades = loadTrades();
@@ -633,6 +662,65 @@ app.post('/api/goals', (req, res) => {
   goals[type].goalPct = value;
   saveGoals(goals);
   res.json(goals);
+});
+
+// --- Journal entries ---
+function journalFileByType(type) {
+  return path.join(__dirname, 'server', type === 'real' ? 'real_journal_entries.json' : 'demo_journal_entries.json');
+}
+function loadJournalByType(type) {
+  try { return JSON.parse(fs.readFileSync(journalFileByType(type), 'utf8')); }
+  catch { return []; }
+}
+function saveJournalByType(type, entries) {
+  fs.writeFileSync(journalFileByType(type), JSON.stringify(entries, null, 2), 'utf8');
+}
+function journalType(req) {
+  const t = req.query.type || req.body.type;
+  return t === 'real' ? 'real' : t === 'demo' ? 'demo' : (isRealAccount() ? 'real' : 'demo');
+}
+
+app.get('/api/journal/demo', (req, res) => res.json(loadJournalByType('demo')));
+app.get('/api/journal/real', (req, res) => res.json(loadJournalByType('real')));
+app.get('/api/journal',      (req, res) => res.json(loadJournalByType(isRealAccount() ? 'real' : 'demo')));
+
+app.post('/api/journal', (req, res) => {
+  const type = journalType(req);
+  const { title, body, notes } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body required' });
+  const entries = loadJournalByType(type);
+  const entry = {
+    id: Date.now(),
+    title: (title || '').trim(),
+    body: body.trim(),
+    notes: (notes || '').trim(),
+    date: new Date().toISOString(),
+  };
+  entries.unshift(entry);
+  saveJournalByType(type, entries);
+  console.log(`[Journal][${type}] Entry created: "${entry.title || '(no title)'}"`);
+  res.status(201).json(entry);
+});
+
+app.patch('/api/journal/:id', (req, res) => {
+  const type = journalType(req);
+  const id = parseInt(req.params.id, 10);
+  const { title, body, notes } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body required' });
+  const entries = loadJournalByType(type);
+  const idx = entries.findIndex(e => e.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Entry not found' });
+  entries[idx] = { ...entries[idx], title: (title || '').trim(), body: body.trim(), notes: (notes || '').trim() };
+  saveJournalByType(type, entries);
+  res.json(entries[idx]);
+});
+
+app.delete('/api/journal/:id', (req, res) => {
+  const type = journalType(req);
+  const id = parseInt(req.params.id, 10);
+  const entries = loadJournalByType(type).filter(e => e.id !== id);
+  saveJournalByType(type, entries);
+  res.json({ deleted: true });
 });
 
 // --- Start server ---

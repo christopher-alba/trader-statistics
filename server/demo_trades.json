@@ -62,7 +62,7 @@
       "outcome": "win",
       "amount": 22.78,
       "closeDate": "2026.09.04 09:10:53",
-      "closeNotes": ""
+      "closeNotes": "good exit. prevented any loss in profit."
     },
     {
       "id": 1788501256699,
@@ -83,7 +83,7 @@
       "outcome": "win",
       "amount": 52.89,
       "closeDate": "2026.09.04 09:07:48",
-      "closeNotes": ""
+      "closeNotes": "this trade took longer than expected"
     }
   ]
 }

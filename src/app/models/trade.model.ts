@@ -27,3 +27,11 @@ export interface TradeData {
   open: OpenTrade[];
   closed: ClosedTrade[];
 }
+
+export interface JournalEntry {
+  id: number;
+  title: string;
+  body: string;
+  notes: string;
+  date: string;
+}

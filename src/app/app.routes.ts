@@ -12,11 +12,6 @@ export const routes: Routes = [
       import('./components/journal/journal.component').then(m => m.JournalComponent),
   },
   {
-    path: 'calculator',
-    loadComponent: () =>
-      import('./components/calculator/calculator.component').then(m => m.CalculatorComponent),
-  },
-  {
     path: 'trade',
     loadComponent: () =>
       import('./components/trade/trade.component').then(m => m.TradeComponent),

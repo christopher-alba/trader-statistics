@@ -418,10 +418,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private parseDate(str: string): Date {
     if (!str) return new Date(NaN);
-    // MT5 format "2026.08.30 00:10:29" — append Z so it's treated as UTC,
-    // matching ISO dates that already carry a Z suffix
+    // MT5 format "2026.08.30 00:10:29" — broker server runs UTC+2 (EET).
+    // Append offset so the Date object carries the correct UTC instant.
     if (/^\d{4}\./.test(str))
-      return new Date(str.replace(/^(\d{4})\.(\d{2})\.(\d{2})\s/, '$1-$2-$3T') + 'Z');
+      return new Date(str.replace(/^(\d{4})\.(\d{2})\.(\d{2})\s/, '$1-$2-$3T') + '+03:00');
     return new Date(str);
   }
 
@@ -664,6 +664,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.parseDate(iso).toLocaleString('en-NZ', {
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
+      timeZone: 'Pacific/Auckland',
     });
   }
 }

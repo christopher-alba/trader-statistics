@@ -168,7 +168,8 @@ textarea.input {
   &-win  { background: rgba(34, 197, 94, 0.15); color: var(--win); }
   &-loss { background: rgba(239, 68, 68, 0.15); color: var(--loss); }
   &-open { background: rgba(245, 158, 11, 0.15); color: var(--open); }
-  &-mt5  { background: rgba(59, 130, 246, 0.15); color: var(--accent); }
+  &-mt5     { background: rgba(59, 130, 246, 0.15); color: var(--accent); }
+  &-journal { background: rgba(124, 58, 237, 0.15); color: #a78bfa; }
 }
 
 // Utils

@@ -1,15 +1,44 @@
 .journal {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
+  height: 100%;
 }
 
 .journal-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 1rem;
+}
+
+.journal-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.25rem;
+}
+
+.journal-tab {
+  padding: 0.35rem 1rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  &:hover { color: #e2e8f0; }
+  &.active {
+    background: var(--accent);
+    color: #fff;
+  }
 }
 
 .page-title {
@@ -18,32 +47,103 @@
   font-size: 1.4rem;
 }
 
-.journal-controls {
+// ---- Two-column layout ----
+.journal-columns {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.journal-col {
   display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+// ---- Column header ----
+.col-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.col-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
+}
+
+.col-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.col-title-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trade-count {
+  font-size: 0.75rem;
+  color: #64748b;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+}
+
+.clear-btn {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+}
+
+.col-controls {
+  display: flex;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 
-.search-input {
-  min-width: 220px;
+.col-search {
+  flex: 1;
+  min-width: 0;
 }
 
-.select-input {
-  min-width: 140px;
+.col-select {
+  min-width: 120px;
 }
 
-.empty-state {
+// ---- Empty state ----
+.col-empty {
   color: #64748b;
+  font-size: 0.85rem;
   text-align: center;
-  padding: 3rem;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 
-.cards-grid {
+// ---- Entry list (single column) ----
+.entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+// ---- Trades grid (auto-fill) ----
+.trades-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
 }
 
+// ---- Cards ----
 .note-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -53,26 +153,44 @@
   flex-direction: column;
   gap: 0.75rem;
   border-left: 4px solid var(--border);
-  transition: border-color 0.2s;
 
-  &--win  { border-left-color: var(--win); }
-  &--loss { border-left-color: var(--loss); }
-  &--open { border-left-color: var(--open); }
+  &--win     { border-left-color: var(--win); }
+  &--loss    { border-left-color: var(--loss); }
+  &--open    { border-left-color: var(--open); }
+  &--journal {
+    border-left-color: #7c3aed;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+
+    &:hover {
+      background: #1a1f2e;
+      border-color: #7c3aed;
+    }
+  }
+  &--selected {
+    border-color: #7c3aed;
+    background: rgba(124, 58, 237, 0.08);
+    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.35);
+  }
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 0.5rem;
 }
 
 .card-instrument {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: #e2e8f0;
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .card-dates {
@@ -80,6 +198,7 @@
   gap: 1rem;
   font-size: 0.8rem;
   color: #64748b;
+  flex-wrap: wrap;
 }
 
 .stats-strip {
@@ -125,10 +244,122 @@
 }
 
 .notes-label {
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  margin-right: 0.25rem;
+}
+
+// ---- Journal entry specifics ----
+.entry-title {
+  color: #c4b5fd;
+  font-size: 0.95rem;
+  font-weight: 700;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.entry-body {
+  font-size: 0.84rem;
+  color: #94a3b8;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.entry-notes {
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.entry-notes-text {
+  font-size: 0.82rem;
+  color: #64748b;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.entry-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.entry-day-hint {
+  font-size: 0.7rem;
+  color: #475569;
+  text-align: right;
+  font-style: italic;
+
+  &--active {
+    color: #7c3aed;
+    font-style: normal;
+    font-weight: 600;
+  }
+}
+
+// ---- New / edit entry form ----
+.new-entry-form {
+  background: var(--surface);
+  border: 1px solid #7c3aed;
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.new-entry-header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #a78bfa;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.15rem;
+}
+
+.form-field-label {
+  font-size: 0.72rem;
   font-weight: 600;
   color: #64748b;
   text-transform: uppercase;
-  font-size: 0.7rem;
   letter-spacing: 0.04em;
-  margin-right: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.field-required {
+  color: var(--loss);
+}
+
+.entry-textarea {
+  min-height: 90px;
+  &--short { min-height: 60px; }
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+// ---- Trade note editing ----
+.trade-edit-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.trade-notes-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  margin-top: 0.25rem;
 }
