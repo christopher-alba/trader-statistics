@@ -23,10 +23,23 @@ import { WebSocketService, Position, DOMData, DOMLevel, TradingState } from '../
 export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('chartContainer') chartContainer!: ElementRef<HTMLDivElement>;
   @ViewChild('indicatorPanesEl') indicatorPanesEl!: ElementRef<HTMLDivElement>;
-  @ViewChild('tickChartContainer') tickChartContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('m5ChartContainer') m5ChartContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('h1ChartContainer') h1ChartContainer!: ElementRef<HTMLDivElement>;
 
-  symbol = '';
+  readonly symbol = 'XAUUSD';
   activeSymbol = '';
+  activeTimeframe = 900;           // M15 default
+  selectedTimeframe: number | null = 900;
+  availableTimeframes: number[] = [];
+  readonly TIMEFRAMES = [
+    { label: 'M1',  secs: 60 },
+    { label: 'M5',  secs: 300 },
+    { label: 'M15', secs: 900 },
+    { label: 'M30', secs: 1800 },
+    { label: 'H1',  secs: 3600 },
+    { label: 'H4',  secs: 14400 },
+    { label: 'D1',  secs: 86400 },
+  ];
   positions: Position[] = [];
   loadError = '';
   timeframeLabel = '';
@@ -171,6 +184,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   toggleLineArmed(d: (typeof this.drawnLines)[0]): void {
+    if (this.isWeekend && !d.orderArmed) return; // allow disarming but not arming on weekends
     d.orderArmed = !d.orderArmed;
     // Reset prev prices so the first tick doesn't false-fire
     this.prevAsk = 0;
@@ -227,13 +241,21 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   private prevAsk = 0;
   private prevBid = 0;
 
+  // Secondary charts — fixed M5 (top) and H1 (bottom)
+  private m5Chart: IChartApi | null = null;
+  private m5CandleSeries: ISeriesApi<'Candlestick', any> | null = null;
+  private m5ResizeObserver: ResizeObserver | null = null;
+  private m5PriceLine: any = null;
+  private m5SecsLeft: number | null = null;
+  private h1Chart: IChartApi | null = null;
+  private h1CandleSeries: ISeriesApi<'Candlestick', any> | null = null;
+  private h1ResizeObserver: ResizeObserver | null = null;
+  private h1PriceLine: any = null;
+  private h1SecsLeft: number | null = null;
+
   private chart: IChartApi | null = null;
   private candleSeries: ISeriesApi<'Candlestick', any> | null = null;
   private domWallEl: HTMLDivElement | null = null;
-  private tickChart: IChartApi | null = null;
-  private tickSeries: ISeriesApi<'Line', any> | null = null;
-  private tickResizeObserver: ResizeObserver | null = null;
-  private tickIndex = 0;
 
   // ── Position odds ────────────────────────────────────────────────
   positionOdds: Map<number, { pSL: number; pTP: number; samples: number }> = new Map();
@@ -462,17 +484,6 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     return val.toFixed(6);
   }
 
-  tickChartWidth = parseInt(localStorage.getItem('tick_chart_width') || '180', 10);
-  tickChartResizing = false;
-  private _resizeStartX = 0;
-  private _resizeStartWidth = 0;
-
-  onResizeHandleMouseDown(e: MouseEvent): void {
-    this.tickChartResizing = true;
-    this._resizeStartX = e.clientX;
-    this._resizeStartWidth = this.tickChartWidth;
-    e.preventDefault();
-  }
   private priceLines: Map<string, any> = new Map();
   private countdownPriceLine: any = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -692,6 +703,8 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   tradingState: TradingState = { enabled: true, disabledReason: null, consecutiveLosses: 0, tradesToday: 0 };
   accountType: 'demo' | 'real' | null = null;
 
+  get isWeekend(): boolean { const d = new Date().getDay(); return d === 0 || d === 6; }
+
   get tradingBlocked(): boolean {
     return !this.tradingState.enabled && this.accountType === 'real';
   }
@@ -734,13 +747,11 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Auto-populate symbol from the live price stream + feed tick chart
     this.subs.add(this.ws.price$.subscribe(p => {
-      if (!this.symbol) this.symbol = p.symbol;
       if (p.symbol === this.activeSymbol) {
         this.currentAsk = p.ask;
         this.checkLineTriggers(p.ask, p.bid);
         this.prevAsk = p.ask;
         this.prevBid = p.bid;
-        this.ngZone.runOutsideAngular(() => this.addTickPoint(p.ask));
       }
       this.cdr.detectChanges();
     }));
@@ -748,6 +759,25 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     // Live bar updates — secsLeft driven purely by MT5
     this.subs.add(this.ws.barUpdate$.subscribe(data => {
       if (data.symbol !== this.activeSymbol) return;
+
+      // Feed secondary charts (only when they are NOT the main chart)
+      if (data.timeframe === 300 && this.m5CandleSeries && this.activeTimeframe !== 300) {
+        if (data.secsLeft !== null) this.m5SecsLeft = data.secsLeft;
+        this.ngZone.runOutsideAngular(() => {
+          this.m5CandleSeries!.update(data.bar as any);
+          this.m5PriceLine = this.updateSecondaryPriceLine(this.m5CandleSeries!, this.m5PriceLine, data.bar, this.m5SecsLeft);
+        });
+      }
+      if (data.timeframe === 3600 && this.h1CandleSeries && this.activeTimeframe !== 3600) {
+        if (data.secsLeft !== null) this.h1SecsLeft = data.secsLeft;
+        this.ngZone.runOutsideAngular(() => {
+          this.h1CandleSeries!.update(data.bar as any);
+          this.h1PriceLine = this.updateSecondaryPriceLine(this.h1CandleSeries!, this.h1PriceLine, data.bar, this.h1SecsLeft);
+        });
+      }
+
+      // Main chart — strict timeframe filter
+      if (data.timeframe !== this.activeTimeframe) return;
       this.lastClose = data.bar.close;
       this.lastOpen  = data.bar.open;
       if (data.secsLeft !== null) this.secsLeft = data.secsLeft;
@@ -755,7 +785,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       const barTime = (data.bar as any).time;
       const last = this.barData[this.barData.length - 1];
       if (last && last.time === barTime) Object.assign(last, data.bar);
-      else { this.barData.push({ ...data.bar }); this.resetTickChart(); }
+      else { this.barData.push({ ...data.bar }); this.recomputeBarStats(); }
       this.ngZone.runOutsideAngular(() => {
         this.candleSeries?.update(data.bar as any);
         this.updateCountdownPriceLine(this.lastClose, this.secsLeft);
@@ -804,7 +834,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.buildChart();
     this.buildWallOverlay();
-    this.buildTickChart();
+    this.buildSecondaryCharts();
     this.restoreState();
   }
 
@@ -815,6 +845,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private saveState(): void {
     localStorage.setItem('chart_symbol', this.activeSymbol);
+    if (this.selectedTimeframe) localStorage.setItem('chart_tf', String(this.selectedTimeframe));
     localStorage.setItem('chart_ma',   JSON.stringify({ enabled: this.maEnabled,   period: this.maPeriod, type: this.maType }));
     localStorage.setItem('chart_rsi',  JSON.stringify({ enabled: this.rsiEnabled,  period: this.rsiPeriod }));
     localStorage.setItem('chart_macd', JSON.stringify({ enabled: this.macdEnabled, fast: this.macdFast, slow: this.macdSlow, signal: this.macdSignalPeriod }));
@@ -824,7 +855,6 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private restoreState(): void {
-    const savedSymbol = localStorage.getItem('chart_symbol');
     try {
       const ma   = JSON.parse(localStorage.getItem('chart_ma')   || '{}');
       const rsi  = JSON.parse(localStorage.getItem('chart_rsi')  || '{}');
@@ -840,22 +870,11 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
       this._pendingRSI  = !!rsi.enabled;
       this._pendingMACD = !!macd.enabled;
       this._pendingAO   = !!ao.enabled;
+      const savedTf = localStorage.getItem('chart_tf');
+      if (savedTf) this.selectedTimeframe = parseInt(savedTf);
     } catch {}
 
-    if (savedSymbol) {
-      this.symbol = savedSymbol;
-      this.loadBars();
-    } else {
-      this.tradeService.getPositions().subscribe({
-        next: positions => {
-          if (positions.length && !this.activeSymbol) {
-            this.symbol = positions[0].symbol;
-            this.loadBars();
-          }
-        },
-        error: () => {},
-      });
-    }
+    this.loadBars();
   }
 
   private setupDragListeners(): void {
@@ -1039,6 +1058,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   executeLineOrder(d: (typeof this.drawnLines)[0]): void {
     if (!this.activeSymbol || d.orderStatus === 'sending') return;
+    if (this.isWeekend) { d.orderStatus = 'error'; this.cdr.detectChanges(); return; }
     d.orderStatus = 'sending';
     const payload: any = {
       symbol:    this.activeSymbol,
@@ -1127,28 +1147,6 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     } catch {}
   }
 
-  private setupChartResizeListeners(): void {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!this.tickChartResizing) return;
-      const delta = e.clientX - this._resizeStartX;
-      // Handle is on the left edge of the tick chart: drag left → bigger, drag right → smaller
-      const newWidth = Math.max(60, Math.min(600, this._resizeStartWidth - delta));
-      this.tickChartWidth = newWidth;
-      this.cdr.detectChanges();
-    };
-    const onMouseUp = () => {
-      if (!this.tickChartResizing) return;
-      this.tickChartResizing = false;
-      localStorage.setItem('tick_chart_width', String(this.tickChartWidth));
-      this.cdr.detectChanges();
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    this._chartCleanup.push(
-      () => document.removeEventListener('mousemove', onMouseMove),
-      () => document.removeEventListener('mouseup', onMouseUp),
-    );
-  }
 
   private buildWallOverlay(): void {
     const container = this.chartContainer.nativeElement as HTMLElement;
@@ -1179,44 +1177,86 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     el.style.borderBottomColor = isAskAbove ? 'rgba(74,222,128,0.55)' : 'rgba(248,113,113,0.55)';
   }
 
-  private buildTickChart(): void {
-    const el = this.tickChartContainer.nativeElement;
-    this.tickChart = createChart(el, {
+
+  private buildSecondaryChart(el: HTMLDivElement): { chart: IChartApi; series: ISeriesApi<'Candlestick', any>; ro: ResizeObserver } {
+    const chart = createChart(el, {
       layout: { background: { type: ColorType.Solid, color: '#161e2e' }, textColor: '#64748b' },
-      grid: { vertLines: { color: '#1e2d42' }, horzLines: { color: '#1e2d42' } },
+      grid: { vertLines: { color: '#1a2640' }, horzLines: { color: '#1a2640' } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: '#2a3347', scaleMargins: { top: 0.08, bottom: 0.08 } },
-      timeScale: { visible: false },
-      handleScroll: false,
-      handleScale: false,
+      timeScale: { borderColor: '#2a3347', timeVisible: true, secondsVisible: false, rightOffset: 10 },
       width: el.clientWidth,
       height: el.clientHeight,
     } as any);
 
-    this.tickSeries = this.tickChart.addSeries(LineSeries, {
-      color: '#60a5fa',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: true,
-      crosshairMarkerRadius: 3,
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: '#22c55e', downColor: '#ef4444',
+      borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+      lastValueVisible: false,
     });
 
-    this.tickResizeObserver = new ResizeObserver(() => {
-      this.tickChart?.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }));
+    ro.observe(el);
+    return { chart, series, ro };
+  }
+
+  buildSecondaryCharts(): void {
+    const m5El = this.m5ChartContainer.nativeElement;
+    const { chart: m5c, series: m5s, ro: m5ro } = this.buildSecondaryChart(m5El);
+    this.m5Chart = m5c;
+    this.m5CandleSeries = m5s;
+    this.m5ResizeObserver = m5ro;
+
+    const h1El = this.h1ChartContainer.nativeElement;
+    const { chart: h1c, series: h1s, ro: h1ro } = this.buildSecondaryChart(h1El);
+    this.h1Chart = h1c;
+    this.h1CandleSeries = h1s;
+    this.h1ResizeObserver = h1ro;
+
+    // Crosshair: secondary → main + other secondary
+    const syncFrom = (srcChart: IChartApi, otherChart: IChartApi | null, otherSeries: ISeriesApi<any> | null) => {
+      srcChart.subscribeCrosshairMove(param => {
+        if (this._syncingCrosshair) return;
+        this._syncingCrosshair = true;
+        if (param.time) {
+          if (this.candleSeries) this.chart?.setCrosshairPosition(NaN, param.time, this.candleSeries);
+          if (otherSeries) try { otherChart?.setCrosshairPosition(NaN, param.time, otherSeries); } catch {}
+        } else {
+          this.chart?.clearCrosshairPosition();
+          try { otherChart?.clearCrosshairPosition(); } catch {}
+        }
+        this._syncingCrosshair = false;
+      });
+    };
+    syncFrom(m5c, h1c, h1s);
+    syncFrom(h1c, m5c, m5s);
+  }
+
+  private loadSecondaryBars(sym: string): void {
+    this.tradeService.getBars(sym, 300).subscribe({
+      next: data => {
+        if (!this.m5CandleSeries) return;
+        this.m5CandleSeries.setData(data.bars as any);
+        this.m5SecsLeft = data.secsLeft;
+        const last = (data.bars as any[])[data.bars.length - 1];
+        if (last) this.m5PriceLine = this.updateSecondaryPriceLine(this.m5CandleSeries, this.m5PriceLine, last, this.m5SecsLeft);
+      },
+      error: () => {},
     });
-    this.tickResizeObserver.observe(el);
+    this.tradeService.getBars(sym, 3600).subscribe({
+      next: data => {
+        if (!this.h1CandleSeries) return;
+        this.h1CandleSeries.setData(data.bars as any);
+        this.h1SecsLeft = data.secsLeft;
+        const last = (data.bars as any[])[data.bars.length - 1];
+        if (last) this.h1PriceLine = this.updateSecondaryPriceLine(this.h1CandleSeries, this.h1PriceLine, last, this.h1SecsLeft);
+      },
+      error: () => {},
+    });
   }
 
-  private addTickPoint(ask: number): void {
-    if (!this.tickSeries) return;
-    this.tickIndex++;
-    try { this.tickSeries.update({ time: this.tickIndex as any, value: ask }); } catch {}
-  }
-
-  private resetTickChart(): void {
-    this.tickIndex = 0;
-    this.tickSeries?.setData([]);
+  private recomputeBarStats(): void {
     this.computeCandleStats();
     this.computeStreakStats();
   }
@@ -1225,8 +1265,10 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     this.subs.unsubscribe();
     this.clearCountdownPriceLine();
     this.resizeObserver?.disconnect();
-    this.tickResizeObserver?.disconnect();
-    this.tickChart?.remove();
+    this.m5ResizeObserver?.disconnect();
+    this.h1ResizeObserver?.disconnect();
+    this.m5Chart?.remove();
+    this.h1Chart?.remove();
     this.domWallEl?.remove();
     this.chart?.remove();
     clearInterval(this.tradeCooldownInterval);
@@ -1302,14 +1344,24 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     });
 
     this.setupDragListeners();
-    this.setupChartResizeListeners();
 
-    // Keep wall overlay in sync whenever the chart is interacted with
-    this.chart.subscribeCrosshairMove(() => { this.updateWallOverlay(); });
+    // Keep wall overlay in sync + sync crosshair to secondary charts
+    this.chart.subscribeCrosshairMove(param => {
+      this.updateWallOverlay();
+      if (this._syncingCrosshair) return;
+      this._syncingCrosshair = true;
+      if (param.time) {
+        if (this.m5CandleSeries)  try { this.m5Chart?.setCrosshairPosition(NaN, param.time, this.m5CandleSeries!); } catch {}
+        if (this.h1CandleSeries) try { this.h1Chart?.setCrosshairPosition(NaN, param.time, this.h1CandleSeries!); } catch {}
+      } else {
+        try { this.m5Chart?.clearCrosshairPosition(); } catch {}
+        try { this.h1Chart?.clearCrosshairPosition(); } catch {}
+      }
+      this._syncingCrosshair = false;
+    });
     this.chart.timeScale().subscribeVisibleTimeRangeChange(() => { this.updateWallOverlay(); });
 
-    // Main → all indicators: sync bar spacing (zoom) + scroll position separately
-    // Avoids setVisibleRange clamping past the last data point
+    // Main → indicator panes only: sync time axis
     this.chart.timeScale().subscribeVisibleTimeRangeChange(() => {
       if (this._syncingTimeAxis) return;
       this._syncingTimeAxis = true;
@@ -1324,6 +1376,11 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  selectTimeframe(secs: number): void {
+    this.selectedTimeframe = secs;
+    this.loadBars();
+  }
+
   loadBars(): void {
     const sym = this.symbol.trim().toUpperCase();
     if (!sym) return;
@@ -1332,10 +1389,15 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     this.marginNzd = null;
     this.domStats = null;
     this.clearCountdownPriceLine();
-    this.resetTickChart();
+    this.recomputeBarStats();
     this.secsLeft = null;
 
-    this.tradeService.getBars(sym).subscribe({
+    this.tradeService.getBarTimeframes(sym).subscribe({
+      next: r => { this.availableTimeframes = r.timeframes; this.cdr.detectChanges(); },
+      error: () => {},
+    });
+
+    this.tradeService.getBars(sym, this.selectedTimeframe ?? undefined).subscribe({
       next: data => {
         this.candleSeries?.setData(data.bars as any);
         this.barData = data.bars as any[];
@@ -1345,6 +1407,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
         this.requestMarginCalc();
         this.refreshMA();
         this.refreshAllIndicators();
+        this.activeTimeframe = data.timeframe;
         this.timeframeLabel = this.formatTimeframe(data.timeframe);
         const bars = data.bars as any[];
         if (bars.length) {
@@ -1370,6 +1433,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
         }
 
         this.restoreDrawnLines();
+        this.loadSecondaryBars(sym);
 
         // Restore enabled indicators after layout settles
         setTimeout(() => {
@@ -1511,6 +1575,27 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  private updateSecondaryPriceLine(
+    series: ISeriesApi<'Candlestick', any>,
+    existing: any,
+    bar: { open: number; close: number },
+    secsLeft: number | null = null,
+  ): any {
+    const isUp = bar.close >= bar.open;
+    const opts = {
+      price: bar.close,
+      color: isUp ? '#22c55e' : '#ef4444',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      axisLabelColor: isUp ? '#bbf7d0' : '#fecaca',
+      axisLabelTextColor: '#000000',
+      title: secsLeft !== null ? this.formatSecsLeft(secsLeft) : '',
+    };
+    if (existing) { try { existing.applyOptions(opts); return existing; } catch {} }
+    return series.createPriceLine(opts as any);
+  }
+
   private clearCountdownPriceLine(): void {
     if (this.countdownPriceLine && this.candleSeries) {
       try { this.candleSeries.removePriceLine(this.countdownPriceLine); } catch {}
@@ -1532,6 +1617,7 @@ export class ChartComponent implements OnInit, AfterViewInit, OnDestroy {
 
   placeTrade(): void {
     if (this.tradePlacing || this.tradeCooldown > 0) return;
+    if (this.isWeekend) { this.tradeError = 'Trading is disabled on weekends. Markets for XAUUSD are closed Saturday–Sunday.'; return; }
     if (!this.activeSymbol || !this.tradeRiskNzd || !this.tradeTpNzd) return;
     if (this.overLimit) { this.tradeError = `Max risk is $${this.maxRisk} (2% of balance)`; return; }
     this.tradePlacing = true;

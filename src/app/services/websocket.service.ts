@@ -42,6 +42,7 @@ export interface BarData {
 
 export interface BarUpdate {
   symbol: string;
+  timeframe: number;
   bar: BarData;
   secsLeft: number | null;
 }

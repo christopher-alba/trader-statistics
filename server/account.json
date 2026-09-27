@@ -1,10 +1,10 @@
 {
-  "balance": 10648.27,
-  "equity": 10648.27,
+  "balance": 10000,
+  "equity": 10000,
   "margin": 0,
-  "freeMargin": 10648.27,
+  "freeMargin": 10000,
   "marginLevel": 0,
   "currency": "NZD",
   "accountType": "demo",
-  "updatedAt": "2026-09-04T07:13:45.013Z"
+  "updatedAt": "2026-09-27T06:29:16.140Z"
 }

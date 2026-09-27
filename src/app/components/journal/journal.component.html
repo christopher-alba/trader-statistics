@@ -1,9 +1,41 @@
 <div class="journal">
   <div class="journal-header">
-    <h2 class="page-title">Trade Journal</h2>
     <div class="journal-tabs">
       <button class="journal-tab" [class.active]="activeTab === 'demo'" (click)="switchTab('demo')">Demo</button>
       <button class="journal-tab" [class.active]="activeTab === 'real'" (click)="switchTab('real')">Real</button>
+    </div>
+  </div>
+
+  <!-- ===== Calendar ===== -->
+  <div class="cal-card">
+    <div class="cal-nav">
+      <button class="cal-nav-btn" (click)="prevMonth()">&#8249;</button>
+      <span class="cal-month-label">{{ calendarMonthLabel }}</span>
+      <button class="cal-nav-btn" (click)="nextMonth()">&#8250;</button>
+    </div>
+    <div class="cal-grid">
+      <div class="cal-dow" *ngFor="let d of ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']">{{ d }}</div>
+      <div
+        class="cal-day"
+        *ngFor="let day of calendarDays"
+        [class.cal-day--other]="!day.isCurrentMonth"
+        [class.cal-day--today]="day.isToday"
+        [class.cal-day--win]="day.goalMet === true"
+        [class.cal-day--loss]="day.goalMet === false"
+      >
+        <div class="cal-day-left">
+          <span class="cal-day-num">{{ day.dayNum }}</span>
+          <ng-container *ngIf="day.goalMet !== null">
+            <span class="cal-pnl" [class.win]="day.netPnL >= 0" [class.loss]="day.netPnL < 0">
+              {{ day.netPnL >= 0 ? '+' : '' }}{{ formatCurrency(day.netPnL) }}
+            </span>
+            <span class="cal-goal">Goal: {{ formatCurrency(day.goalTarget) }}</span>
+          </ng-container>
+        </div>
+        <span *ngIf="day.goalMet !== null" class="cal-result" [class.cal-result--win]="day.goalMet" [class.cal-result--loss]="!day.goalMet">
+          {{ day.goalMet ? '✓' : '✗' }}
+        </span>
+      </div>
     </div>
   </div>
 

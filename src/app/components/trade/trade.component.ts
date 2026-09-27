@@ -27,7 +27,7 @@ interface TradeCommand {
 })
 export class TradeComponent implements OnInit, OnDestroy {
   // Form state
-  symbol    = '';
+  readonly symbol = 'XAUUSD';
   direction: 'buy' | 'sell' = 'buy';
   riskMode: 'pct' | 'fixed' = 'pct';
   riskPct   = 2;    // % of balance to risk if SL hit
@@ -107,6 +107,8 @@ export class TradeComponent implements OnInit, OnDestroy {
       ? +(this.balance * this.riskPct / 100).toFixed(2)
       : this.riskFixed;
   }
+  get isWeekend(): boolean { const d = new Date().getDay(); return d === 0 || d === 6; }
+
   get effectiveTp(): number {
     return this.autoRR ? +(this.riskNzd * this.rrMultiplier).toFixed(2) : this.tpNzdInput;
   }
@@ -156,6 +158,7 @@ export class TradeComponent implements OnInit, OnDestroy {
 
   placeTrade() {
     if (this.placing || this.cooldown > 0) return;
+    if (this.isWeekend) { this.error = 'Trading is disabled on weekends. Markets for XAUUSD are closed Saturday–Sunday.'; return; }
     const slValid = this.slMode === 'pct' ? !!this.slPct : !!this.slFixed;
     if (!this.symbol.trim() || !this.riskNzd || !slValid || !this.tpNzdInput) return;
     if (this.overLimit) { this.error = `Max risk is $${this.maxRisk} (10% of balance)`; return; }
@@ -186,7 +189,6 @@ export class TradeComponent implements OnInit, OnDestroy {
 
   private startCooldown() {
     this.cooldown = 5;
-    this.symbol = '';
     clearInterval(this.cooldownInterval);
     this.cooldownInterval = setInterval(() => {
       this.cooldown--;

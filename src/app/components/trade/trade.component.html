@@ -7,9 +7,13 @@
       <div class="card-title">Place Trade via MT5</div>
       <p class="card-subtitle">Command is queued and executed by the EA on the next poll (~1 second).</p>
 
+      <div class="weekend-banner" *ngIf="isWeekend">
+        Markets closed — trading disabled on weekends (Sat–Sun).
+      </div>
+
       <div class="form-group">
-        <label>Symbol</label>
-        <input type="text" [(ngModel)]="symbol" placeholder="e.g. BTCUSD, EURUSD" (input)="symbol = symbol.toUpperCase()" />
+        <label>Symbol <span class="sub-label">(XAUUSD only)</span></label>
+        <input type="text" [value]="symbol" readonly />
       </div>
 
       <div class="form-group">
@@ -118,7 +122,7 @@
       <div class="error-msg" *ngIf="error">{{ error }}</div>
 
       <button class="place-btn" [class.buy]="direction === 'buy'" [class.sell]="direction === 'sell'"
-        [disabled]="placing || cooldown > 0 || !symbol.trim()" (click)="placeTrade()">
+        [disabled]="placing || cooldown > 0 || isWeekend" (click)="placeTrade()">
         {{ placing ? 'Queueing…' : cooldown > 0 ? 'Wait ' + cooldown + 's…' : (direction === 'buy' ? '▲ Place Buy' : '▼ Place Sell') }}
       </button>
     </div>

@@ -31,8 +31,9 @@ export class App implements OnInit, OnDestroy {
 
   private parseDate(str: string): Date {
     if (!str) return new Date(NaN);
+    // MT5 broker server runs EET/EEST (UTC+3 in summer)
     if (/^\d{4}\./.test(str))
-      return new Date(str.replace(/^(\d{4})\.(\d{2})\.(\d{2})\s/, '$1-$2-$3T') + 'Z');
+      return new Date(str.replace(/^(\d{4})\.(\d{2})\.(\d{2})\s/, '$1-$2-$3T') + '+03:00');
     return new Date(str);
   }
 
@@ -79,6 +80,7 @@ export class App implements OnInit, OnDestroy {
           this.accountFreeMargin = a.freeMargin  ?? null;
           this.accountMarginLevel = a.marginLevel ?? null;
           this.accountCurrency   = a.currency;
+          this.cdr.detectChanges();
         }
       })
     );

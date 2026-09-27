@@ -558,14 +558,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       ? stats.reduce((s, d) => s + (d.startBalance > 0 ? (d.netPnL / d.startBalance) * 100 : 0), 0) / stats.length
       : 0;
 
-    let tradingDaysPerMonth = 20;
-    if (stats.length >= 2) {
-      const firstDate = new Date(stats[0].date);
-      const lastDate  = new Date(stats[stats.length - 1].date);
-      const calMonths = Math.max(1,
-        (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44));
-      tradingDaysPerMonth = Math.max(1, Math.round(stats.length / calMonths));
-    }
+    const currentTradingDaysPerMonth = 20;
+    const goalTradingDaysPerMonth = 20;
 
     const labels = ['Now'];
     const currentPace = [+currentBalance.toFixed(2)];
@@ -577,8 +571,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     for (let m = 1; m <= 12; m++) {
       const d = new Date(today.getFullYear(), today.getMonth() + m, 1);
       labels.push(d.toLocaleString('en-NZ', { month: 'short', year: '2-digit' }));
-      for (let day = 0; day < tradingDaysPerMonth; day++) {
+      for (let day = 0; day < currentTradingDaysPerMonth; day++) {
         balCurrent *= 1 + avgDailyPct / 100;
+      }
+      for (let day = 0; day < goalTradingDaysPerMonth; day++) {
         balGoal    *= 1 + this.goalTargetPct / 100;
       }
       currentPace.push(+balCurrent.toFixed(2));

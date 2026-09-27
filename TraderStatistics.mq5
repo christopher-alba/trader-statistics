@@ -11,13 +11,16 @@
 //|  4. Drag onto any chart. Works across all symbols automatically. |
 //+------------------------------------------------------------------+
 #property copyright "TraderStatistics"
-#property version   "1.13"
+#property version   "1.17"
 #property strict
 
 //--- Inputs
 input string ServerUrl    = "http://127.0.0.1:3000"; // Backend URL
 input int    MagicNumber  = 0;                        // 0 = all trades
 input int    PollMs       = 200;                      // Command poll interval (ms)
+
+//--- Timeframes broadcast to the frontend
+ENUM_TIMEFRAMES g_AllTF[] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30, PERIOD_H1, PERIOD_H4, PERIOD_D1};
 
 //--- State
 double   g_LastPostedAsk     = -1;
@@ -49,7 +52,9 @@ int OnInit()
       Print("[TS] WARNING: server not reachable (code=", code, "). Is npm run dev running?");
 
    PostAccountBalance();
-   SendHistoricalBars(Symbol(), PERIOD_CURRENT, 3000);
+   int tfCount = ArraySize(g_AllTF);
+   for(int t = 0; t < tfCount; t++)
+      SendHistoricalBars(Symbol(), g_AllTF[t], 3000);
    SendOpenPositions();
    MarketBookAdd(Symbol());
    return INIT_SUCCEEDED;
@@ -691,30 +696,36 @@ void SendHistoricalBars(string symbol, ENUM_TIMEFRAMES tf, int count)
 }
 
 //+------------------------------------------------------------------+
-//| Post the current forming candle                                  |
+//| Post the current forming candle for every timeframe              |
 //+------------------------------------------------------------------+
 void PostCurrentBar()
 {
-   MqlRates rates[];
-   ArraySetAsSeries(rates, false);
-   if(CopyRates(Symbol(), PERIOD_CURRENT, 0, 1, rates) < 1) return;
+   string sym     = Symbol();
+   int    tfCount = ArraySize(g_AllTF);
+   for(int t = 0; t < tfCount; t++)
+   {
+      ENUM_TIMEFRAMES tf = g_AllTF[t];
+      MqlRates rates[];
+      ArraySetAsSeries(rates, false);
+      if(CopyRates(sym, tf, 0, 1, rates) < 1) continue;
 
-   long secsLeft = (long)(rates[0].time + PeriodSeconds(PERIOD_CURRENT)) - (long)TimeCurrent();
-   if(secsLeft < 0) secsLeft = 0;
+      long secsLeft = (long)(rates[0].time + PeriodSeconds(tf)) - (long)TimeCurrent();
+      if(secsLeft < 0) secsLeft = 0;
 
-   string json = "{\"symbol\":\"" + Symbol() + "\","
-               + "\"secsLeft\":" + IntegerToString(secsLeft) + ","
-               + "\"bar\":{"
-               + "\"time\":"  + IntegerToString((long)rates[0].time) + ","
-               + "\"open\":"  + DoubleToString(rates[0].open,  8) + ","
-               + "\"high\":"  + DoubleToString(rates[0].high,  8) + ","
-               + "\"low\":"   + DoubleToString(rates[0].low,   8) + ","
-               + "\"close\":" + DoubleToString(rates[0].close, 8) + "}}";
+      string json = "{\"symbol\":\"" + sym + "\","
+                  + "\"timeframe\":" + IntegerToString(PeriodSeconds(tf)) + ","
+                  + "\"secsLeft\":"  + IntegerToString(secsLeft) + ","
+                  + "\"bar\":{"
+                  + "\"time\":"  + IntegerToString((long)rates[0].time) + ","
+                  + "\"open\":"  + DoubleToString(rates[0].open,  8) + ","
+                  + "\"high\":"  + DoubleToString(rates[0].high,  8) + ","
+                  + "\"low\":"   + DoubleToString(rates[0].low,   8) + ","
+                  + "\"close\":" + DoubleToString(rates[0].close, 8) + "}}";
 
-   // Use a silent POST — bar update failures don't trigger the global backoff
-   char post[], result[]; string rh;
-   StringToCharArray(json, post, 0, StringLen(json));
-   WebRequest("POST", ServerUrl + "/api/bar/update", "Content-Type: application/json\r\n", 2000, post, result, rh);
+      char post[], result[]; string rh;
+      StringToCharArray(json, post, 0, StringLen(json));
+      WebRequest("POST", ServerUrl + "/api/bar/update", "Content-Type: application/json\r\n", 2000, post, result, rh);
+   }
 }
 
 //+------------------------------------------------------------------+

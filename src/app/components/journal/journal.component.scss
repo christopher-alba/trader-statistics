@@ -349,6 +349,124 @@
   margin-top: 0.25rem;
 }
 
+// ---- Calendar ----
+.cal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.cal-month-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.03em;
+}
+
+.cal-nav-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: #94a3b8;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+
+  &:hover { color: #e2e8f0; background: #1e293b; }
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.cal-dow {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding-bottom: 0.4rem;
+}
+
+.cal-day {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  min-height: 76px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  transition: border-color 0.15s;
+
+  &--other { opacity: 0.3; }
+
+  &--today {
+    border-color: #7c3aed;
+    box-shadow: 0 0 0 1px rgba(124,58,237,0.3);
+  }
+
+  &--win  { border-left: 3px solid var(--win); }
+  &--loss { border-left: 3px solid var(--loss); }
+}
+
+.cal-day-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.cal-day-num {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #94a3b8;
+  line-height: 1;
+}
+
+.cal-result {
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+  flex-shrink: 0;
+
+  &--win  { color: var(--win); }
+  &--loss { color: var(--loss); }
+}
+
+.cal-pnl {
+  font-size: 0.7rem;
+  font-weight: 700;
+
+  &.win  { color: var(--win); }
+  &.loss { color: var(--loss); }
+}
+
+.cal-goal {
+  font-size: 0.62rem;
+  color: #475569;
+  line-height: 1;
+}
+
 // ---- Trade note editing ----
 .trade-edit-row {
   display: flex;

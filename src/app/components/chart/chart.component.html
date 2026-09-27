@@ -2,8 +2,19 @@
   <div class="chart-toolbar">
     <div class="toolbar-left">
       <span *ngIf="activeSymbol" class="symbol-badge">{{ activeSymbol }}</span>
-      <span *ngIf="timeframeLabel" class="tf-badge">{{ timeframeLabel }}</span>
       <span *ngIf="secsLeftLabel" class="candle-countdown">{{ secsLeftLabel }}</span>
+
+      <!-- Timeframe selector -->
+      <div class="tf-selector" *ngIf="activeSymbol">
+        <button
+          *ngFor="let tf of TIMEFRAMES"
+          class="tf-btn"
+          [class.active]="activeTimeframe === tf.secs"
+          [class.available]="availableTimeframes.includes(tf.secs)"
+          (click)="selectTimeframe(tf.secs)">
+          {{ tf.label }}
+        </button>
+      </div>
 
       <div class="toolbar-sep" *ngIf="activeSymbol"></div>
 
@@ -57,10 +68,9 @@
     <div class="symbol-input-group">
       <input
         type="text"
-        [(ngModel)]="symbol"
-        placeholder="Symbol…"
+        [value]="symbol"
+        readonly
         class="input symbol-input"
-        (keydown.enter)="loadBars()"
       />
       <button class="btn btn-primary" (click)="loadBars()">Load</button>
     </div>
@@ -152,61 +162,70 @@
         </div>
       </div>
 
-      <div class="chart-main-row" [class.resizing]="tickChartResizing">
-        <div #chartContainer class="chart-container"></div>
+      <div class="multi-chart-layout">
 
-        <!-- DOM overlay — absolute, never affects chart height -->
-        <div class="dom-overlay" *ngIf="domStats as d">
-          <!-- Summary row -->
-          <div class="dom-overlay-summary">
-            <span [class.cs-green]="d.signal === 'bullish'"
-                  [class.cs-red]="d.signal === 'bearish'"
-                  [class.cs-val]="d.signal === 'neutral'"
-                  class="dom-signal">
-              {{ d.signal === 'bullish' ? '▲ Bullish' : d.signal === 'bearish' ? '▼ Bearish' : '→ Neutral' }}
-            </span>
-            <div class="cs-divider"></div>
-            <span class="cs-green">▲ {{ d.bidPct | number:'1.0-1' }}%</span>
-            <div class="cs-prob-track">
-              <div class="cs-prob-green" [style.width.%]="d.bidPct"></div>
-            </div>
-            <span class="cs-red">▼ {{ d.askPct | number:'1.0-1' }}%</span>
-            <div class="cs-divider"></div>
-            <span class="cs-key">Buy wall</span>
-            <span class="cs-green"><b>{{ d.biggestBid.volume }}</b>&nbsp;@&nbsp;{{ d.biggestBid.price }}</span>
-            <div class="cs-divider"></div>
-            <span class="cs-key">Sell wall</span>
-            <span class="cs-red"><b>{{ d.biggestAsk.volume }}</b>&nbsp;@&nbsp;{{ d.biggestAsk.price }}</span>
-          </div>
+        <!-- Left: M15 main chart -->
+        <div class="main-chart-col">
+          <div class="chart-main-row">
+            <div #chartContainer class="chart-container"></div>
 
-          <!-- Order book levels -->
-          <div class="dom-overlay-book">
-            <div class="dom-levels dom-levels--ask">
-              <div *ngFor="let l of d.topAsks" class="dom-level dom-level--ask"
-                   [style.--bar-pct]="(l.volume / d.biggestAsk.volume * 100) + '%'">
-                <span class="dom-level-vol">{{ l.volume }}</span>
-                <span class="dom-level-price">{{ l.price }}</span>
+            <!-- DOM overlay — absolute, never affects chart height -->
+            <div class="dom-overlay" *ngIf="domStats as d">
+              <div class="dom-overlay-summary">
+                <span [class.cs-green]="d.signal === 'bullish'"
+                      [class.cs-red]="d.signal === 'bearish'"
+                      [class.cs-val]="d.signal === 'neutral'"
+                      class="dom-signal">
+                  {{ d.signal === 'bullish' ? '▲ Bullish' : d.signal === 'bearish' ? '▼ Bearish' : '→ Neutral' }}
+                </span>
+                <div class="cs-divider"></div>
+                <span class="cs-green">▲ {{ d.bidPct | number:'1.0-1' }}%</span>
+                <div class="cs-prob-track">
+                  <div class="cs-prob-green" [style.width.%]="d.bidPct"></div>
+                </div>
+                <span class="cs-red">▼ {{ d.askPct | number:'1.0-1' }}%</span>
+                <div class="cs-divider"></div>
+                <span class="cs-key">Buy wall</span>
+                <span class="cs-green"><b>{{ d.biggestBid.volume }}</b>&nbsp;@&nbsp;{{ d.biggestBid.price }}</span>
+                <div class="cs-divider"></div>
+                <span class="cs-key">Sell wall</span>
+                <span class="cs-red"><b>{{ d.biggestAsk.volume }}</b>&nbsp;@&nbsp;{{ d.biggestAsk.price }}</span>
+              </div>
+              <div class="dom-overlay-book">
+                <div class="dom-levels dom-levels--ask">
+                  <div *ngFor="let l of d.topAsks" class="dom-level dom-level--ask"
+                       [style.--bar-pct]="(l.volume / d.biggestAsk.volume * 100) + '%'">
+                    <span class="dom-level-vol">{{ l.volume }}</span>
+                    <span class="dom-level-price">{{ l.price }}</span>
+                  </div>
+                </div>
+                <div class="dom-levels dom-levels--bid">
+                  <div *ngFor="let l of d.topBids" class="dom-level dom-level--bid"
+                       [style.--bar-pct]="(l.volume / d.biggestBid.volume * 100) + '%'">
+                    <span class="dom-level-vol">{{ l.volume }}</span>
+                    <span class="dom-level-price">{{ l.price }}</span>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="dom-levels dom-levels--bid">
-              <div *ngFor="let l of d.topBids" class="dom-level dom-level--bid"
-                   [style.--bar-pct]="(l.volume / d.biggestBid.volume * 100) + '%'">
-                <span class="dom-level-vol">{{ l.volume }}</span>
-                <span class="dom-level-price">{{ l.price }}</span>
-              </div>
-            </div>
+
+          </div>
+          <div #indicatorPanesEl class="indicator-panes-host"></div>
+        </div>
+
+        <!-- Right: M5 (top) + H1 (bottom) -->
+        <div class="secondary-chart-col">
+          <div class="secondary-chart-row">
+            <span class="secondary-chart-label">M5</span>
+            <div #m5ChartContainer class="secondary-chart-container"></div>
+          </div>
+          <div class="secondary-chart-row secondary-chart-row--h1">
+            <span class="secondary-chart-label">H1</span>
+            <div #h1ChartContainer class="secondary-chart-container"></div>
           </div>
         </div>
 
-        <div class="chart-resize-handle" (mousedown)="onResizeHandleMouseDown($event)">
-          <div class="chart-resize-grip"></div>
-        </div>
-        <div class="tick-chart-wrap" [style.width.px]="tickChartWidth">
-          <div class="tick-chart-header">Tick</div>
-          <div #tickChartContainer class="tick-chart-container"></div>
-        </div>
       </div>
-      <div #indicatorPanesEl class="indicator-panes-host"></div>
     </div>
 
     <!-- Positions panel -->
@@ -221,6 +240,11 @@
           · {{ tradingState.consecutiveLosses }} consecutive loss{{ tradingState.consecutiveLosses !== 1 ? 'es' : '' }}
           · resets midnight
         </div>
+      </div>
+
+      <!-- Weekend banner -->
+      <div class="weekend-banner" *ngIf="isWeekend">
+        Markets closed — trading disabled on weekends (Sat–Sun).
       </div>
 
       <!-- Open trade form -->
@@ -289,8 +313,8 @@
           ⚠ Need ${{ marginNzd }} margin — only ${{ freeMargin }} free
         </div>
         <button class="btn-place" [class.buy]="tradeDirection === 'buy'" [class.sell]="tradeDirection === 'sell'"
-          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol || marginInsufficient || tradingBlocked">
-          {{ tradingBlocked ? '⛔ Trading Disabled' : tradePlacing ? 'Queueing…' : tradeCooldown > 0 ? 'Wait ' + tradeCooldown + 's…' : (tradeDirection === 'buy' ? '▲ Buy ' : '▼ Sell ') + activeSymbol }}
+          (click)="placeTrade()" [disabled]="tradePlacing || tradeCooldown > 0 || !activeSymbol || marginInsufficient || tradingBlocked || isWeekend">
+          {{ isWeekend ? 'Markets Closed (Weekend)' : tradingBlocked ? '⛔ Trading Disabled' : tradePlacing ? 'Queueing…' : tradeCooldown > 0 ? 'Wait ' + tradeCooldown + 's…' : (tradeDirection === 'buy' ? '▲ Buy ' : '▼ Sell ') + activeSymbol }}
         </button>
       </div>
 
@@ -402,16 +426,16 @@
             </div>
             <button class="btn-arm"
               [class.armed]="d.orderArmed"
-              [disabled]="d.orderStatus==='sending' || lineMarginInsufficient(d)"
+              [disabled]="d.orderStatus==='sending' || lineMarginInsufficient(d) || (isWeekend && !d.orderArmed)"
               (click)="toggleLineArmed(d)">
-              {{ d.orderArmed ? '🎯 Armed — waiting for price' : '🎯 Arm (auto-execute at price)' }}
+              {{ d.orderArmed ? '🎯 Armed — waiting for price' : isWeekend ? '🔒 Markets Closed' : '🎯 Arm (auto-execute at price)' }}
             </button>
             <button class="btn-place"
               [class.buy]="d.orderDirection==='buy'"
               [class.sell]="d.orderDirection==='sell'"
               [class.sent]="d.orderStatus==='sent'"
               [class.error]="d.orderStatus==='error'"
-              [disabled]="d.orderStatus==='sending' || !activeSymbol || lineMarginInsufficient(d)"
+              [disabled]="d.orderStatus==='sending' || !activeSymbol || lineMarginInsufficient(d) || isWeekend"
               (click)="executeLineOrder(d)">
               <ng-container [ngSwitch]="d.orderStatus">
                 <span *ngSwitchCase="'sending'">Queueing…</span>

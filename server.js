@@ -164,27 +164,47 @@ app.post('/api/trade/close', (req, res) => {
     (body.ticket && t.mt5Ticket === body.ticket)
   );
 
-  if (idx === -1) {
-    return res.status(404).json({ error: 'Open trade not found' });
-  }
-
-  const trade = trades.open.splice(idx, 1)[0];
   const profit = body.profit !== undefined ? body.profit : body.amount || 0;
 
-  const closedTrade = {
-    ...trade,
-    outcome: body.outcome || (profit >= 0 ? 'win' : 'loss'),
-    amount: body.amount !== undefined ? body.amount : profit,
-    closeDate: body.closeDate || body.time || new Date().toISOString(),
-    closeNotes: body.closeNotes || '',
-  };
+  let closedTrade;
+  if (idx === -1) {
+    // Position was opened outside Angular (e.g. directly in MT5) — still record the close
+    closedTrade = {
+      id: Date.now(),
+      instrument: body.symbol || 'UNKNOWN',
+      investmentSize: body.volume || 0,
+      riskPct: 0,
+      riskNzd: 0,
+      openDate: body.closeDate || new Date().toISOString(),
+      notes: '',
+      source: 'mt5',
+      mt5Ticket: body.mt5Ticket || body.ticket || undefined,
+      positionId: body.positionId || undefined,
+      volume: body.volume || undefined,
+      price: body.price || undefined,
+      currency: body.currency,
+      outcome: body.outcome || (profit >= 0 ? 'win' : 'loss'),
+      amount: body.amount !== undefined ? body.amount : Math.abs(profit),
+      closeDate: body.closeDate || new Date().toISOString(),
+      closeNotes: '',
+    };
+    console.log(`[API] Untracked close recorded: ${closedTrade.instrument} outcome=${closedTrade.outcome} amount=${closedTrade.amount}`);
+  } else {
+    const trade = trades.open.splice(idx, 1)[0];
+    closedTrade = {
+      ...trade,
+      outcome: body.outcome || (profit >= 0 ? 'win' : 'loss'),
+      amount: body.amount !== undefined ? body.amount : profit,
+      closeDate: body.closeDate || body.time || new Date().toISOString(),
+      closeNotes: body.closeNotes || '',
+    };
+    console.log(`[API] Trade closed: ${closedTrade.instrument} outcome=${closedTrade.outcome} amount=${closedTrade.amount}`);
+  }
 
   trades.closed.unshift(closedTrade); // newest first
   saveTrades(trades);
   broadcast(trades);
   applyCircuitBreaker(closedTrade.outcome);
-
-  console.log(`[API] Trade closed: ${closedTrade.instrument} outcome=${closedTrade.outcome} amount=${closedTrade.amount}`);
   res.json(closedTrade);
 });
 
@@ -363,34 +383,51 @@ app.get('/api/dom/:symbol', (req, res) => {
 });
 
 // --- Candlestick bars + live positions ---
-const barsStore = {}; // { BTCUSD: { timeframe, bars: [], secsLeft } }
+// barsStore: { XAUUSD: { 300: { timeframe, bars, secsLeft }, 3600: {...} } }
+const barsStore = {};
 let lastPositions = [];
 
 app.post('/api/bars', (req, res) => {
   const { symbol, timeframe, bars, append } = req.body;
   if (!symbol || !Array.isArray(bars)) return res.status(400).json({ error: 'invalid' });
   const sym = symbol.toUpperCase();
-  if (append && barsStore[sym]) {
-    barsStore[sym].bars.push(...bars);
+  const tf = timeframe || 0;
+  if (!barsStore[sym]) barsStore[sym] = {};
+  if (append && barsStore[sym][tf]) {
+    barsStore[sym][tf].bars.push(...bars);
   } else {
-    barsStore[sym] = { timeframe, bars: [...bars] };
+    barsStore[sym][tf] = { timeframe: tf, bars: [...bars], secsLeft: null };
   }
-  console.log(`[API] Bars for ${sym}: ${barsStore[sym].bars.length} total (chunk of ${bars.length})`);
-  res.json({ stored: barsStore[sym].bars.length });
+  if (barsStore[sym][tf].bars.length > 3500) barsStore[sym][tf].bars.splice(0, barsStore[sym][tf].bars.length - 3500);
+  console.log(`[API] Bars for ${sym}/${tf}: ${barsStore[sym][tf].bars.length} total (chunk of ${bars.length})`);
+  res.json({ stored: barsStore[sym][tf].bars.length });
 });
 
+// GET /api/bars/:symbol?tf=300  (tf optional — returns first available if omitted)
 app.get('/api/bars/:symbol', (req, res) => {
-  const data = barsStore[req.params.symbol.toUpperCase()];
-  if (!data) return res.status(404).json({ error: 'No bars for ' + req.params.symbol });
+  const sym = req.params.symbol.toUpperCase();
+  if (!barsStore[sym]) return res.status(404).json({ error: 'No bars for ' + sym });
+  const tf = req.query.tf != null ? parseInt(req.query.tf) : null;
+  const data = tf != null ? barsStore[sym][tf] : Object.values(barsStore[sym])[0];
+  if (!data) return res.status(404).json({ error: 'No bars for ' + sym + (tf ? '/' + tf : '') });
   res.json({ ...data, secsLeft: data.secsLeft ?? null });
 });
 
+// GET /api/bars/:symbol/timeframes  — list available timeframes for the symbol
+app.get('/api/bars/:symbol/timeframes', (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  const tfs = barsStore[sym] ? Object.keys(barsStore[sym]).map(Number) : [];
+  res.json({ symbol: sym, timeframes: tfs });
+});
+
 app.post('/api/bar/update', (req, res) => {
-  const { symbol, bar, secsLeft } = req.body;
+  const { symbol, timeframe, bar, secsLeft } = req.body;
   if (!symbol || !bar) return res.status(400).json({ error: 'invalid' });
   const sym = symbol.toUpperCase();
-  if (barsStore[sym]) {
-    const bars = barsStore[sym].bars;
+  // fall back to first stored timeframe if EA doesn't send one
+  const tf = timeframe != null ? timeframe : (barsStore[sym] ? Number(Object.keys(barsStore[sym])[0]) : 0);
+  if (barsStore[sym]?.[tf]) {
+    const bars = barsStore[sym][tf].bars;
     const last = bars[bars.length - 1];
     if (last && last.time === bar.time) {
       bars[bars.length - 1] = bar;
@@ -398,9 +435,9 @@ app.post('/api/bar/update', (req, res) => {
       bars.push(bar);
       if (bars.length > 3500) bars.shift();
     }
-    if (secsLeft !== undefined) barsStore[sym].secsLeft = secsLeft;
+    if (secsLeft !== undefined) barsStore[sym][tf].secsLeft = secsLeft;
   }
-  const msg = JSON.stringify({ type: 'bar_update', data: { symbol: sym, bar, secsLeft: secsLeft ?? null } });
+  const msg = JSON.stringify({ type: 'bar_update', data: { symbol: sym, timeframe: tf, bar, secsLeft: secsLeft ?? null } });
   wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
   res.json({ ok: true });
 });
@@ -468,7 +505,6 @@ app.post('/api/account', (req, res) => {
     accountType: body.accountType             || accountData.accountType || 'demo',
     updatedAt:   new Date().toISOString(),
   };
-  console.log(`[API] Account update: balance=${accountData.balance} equity=${accountData.equity} ${accountData.currency}`);
   saveAccount(accountData);
 
   // Persist balance into goals file so it survives server restarts

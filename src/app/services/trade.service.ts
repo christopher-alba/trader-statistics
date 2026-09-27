@@ -49,8 +49,13 @@ export class TradeService {
     return this.http.get<any>(`${BASE}/price/${encodeURIComponent(symbol.toUpperCase())}`);
   }
 
-  getBars(symbol: string): Observable<{ timeframe: number; bars: any[]; secsLeft: number | null }> {
-    return this.http.get<any>(`${BASE}/bars/${encodeURIComponent(symbol.toUpperCase())}`);
+  getBars(symbol: string, timeframe?: number): Observable<{ timeframe: number; bars: any[]; secsLeft: number | null }> {
+    const tf = timeframe != null ? `?tf=${timeframe}` : '';
+    return this.http.get<any>(`${BASE}/bars/${encodeURIComponent(symbol.toUpperCase())}${tf}`);
+  }
+
+  getBarTimeframes(symbol: string): Observable<{ symbol: string; timeframes: number[] }> {
+    return this.http.get<any>(`${BASE}/bars/${encodeURIComponent(symbol.toUpperCase())}/timeframes`);
   }
 
   getPositions(): Observable<any[]> {

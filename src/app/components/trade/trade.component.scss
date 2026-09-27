@@ -178,6 +178,23 @@
   }
 }
 
+input[readonly] {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.weekend-banner {
+  background: rgba(234,179,8,0.12);
+  border: 1px solid rgba(234,179,8,0.4);
+  color: #fbbf24;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
 .error-msg {
   color: var(--loss);
   font-size: 12px;

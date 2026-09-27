@@ -1,12 +1,21 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subscription, catchError, of } from 'rxjs';
+import { Subscription, forkJoin } from 'rxjs';
 import { TradeService } from '../../services/trade.service';
-import { WebSocketService } from '../../services/websocket.service';
 import { OpenTrade, ClosedTrade, TradeData, JournalEntry } from '../../models/trade.model';
 
 type AnyTrade = (OpenTrade | ClosedTrade) & { isClosed?: boolean };
+
+interface CalendarDay {
+  date: string;
+  dayNum: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  netPnL: number;
+  goalTarget: number;
+  goalMet: boolean | null;
+}
 
 @Component({
   selector: 'app-journal',
@@ -30,6 +39,12 @@ export class JournalComponent implements OnInit, OnDestroy {
   entrySearch = '';
   entrySortBy = 'date-desc';
 
+  // Calendar
+  calendarYear = new Date().getFullYear();
+  calendarMonth = new Date().getMonth();
+  goalTargetPct = 2;
+  goalBalance = 0;
+
   // Clicked entry — filters trades column to that day
   selectedEntry: JournalEntry | null = null;
 
@@ -52,16 +67,11 @@ export class JournalComponent implements OnInit, OnDestroy {
 
   private subs = new Subscription();
 
-  constructor(
-    private tradeService: TradeService,
-    private wsService: WebSocketService
-  ) {}
+  constructor(private tradeService: TradeService, private cdr: ChangeDetectorRef) {}
 
   ngOnInit(): void {
     this.loadAll();
-    this.subs.add(
-      this.wsService.messages$.subscribe((data: TradeData) => this.setData(data))
-    );
+    
   }
 
   ngOnDestroy(): void {
@@ -79,9 +89,17 @@ export class JournalComponent implements OnInit, OnDestroy {
   }
 
   private loadAll(): void {
-    this.tradeService.getTrades(this.activeTab).subscribe(data => this.setData(data));
-    this.tradeService.getJournalEntries(this.activeTab).subscribe(entries => {
+    forkJoin({
+      trades:  this.tradeService.getTrades(this.activeTab),
+      entries: this.tradeService.getJournalEntries(this.activeTab),
+      goals:   this.tradeService.getGoals(),
+    }).subscribe(({ trades, entries, goals }) => {
+      this.setData(trades);
       this.journalEntries = entries;
+      const g = goals[this.activeTab];
+      this.goalTargetPct = g?.goalPct ?? 2;
+      this.goalBalance   = g?.balance ?? 0;
+      this.cdr.detectChanges();
     });
   }
 
@@ -96,6 +114,86 @@ export class JournalComponent implements OnInit, OnDestroy {
     const NZT = 'Pacific/Auckland';
     const fmt = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: NZT }); // YYYY-MM-DD
     return fmt(this.parseDate(a)) === fmt(this.parseDate(b));
+  }
+
+  // --- Calendar ---
+  get calendarMonthLabel(): string {
+    return new Date(this.calendarYear, this.calendarMonth, 1)
+      .toLocaleDateString('en-NZ', { month: 'long', year: 'numeric' });
+  }
+
+  prevMonth(): void {
+    if (this.calendarMonth === 0) { this.calendarMonth = 11; this.calendarYear--; }
+    else this.calendarMonth--;
+  }
+
+  nextMonth(): void {
+    if (this.calendarMonth === 11) { this.calendarMonth = 0; this.calendarYear++; }
+    else this.calendarMonth++;
+  }
+
+  get calendarDays(): CalendarDay[] {
+    const NZT = 'Pacific/Auckland';
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: NZT });
+
+    // Build per-day stats from closed trades using running balance
+    const closed = this.allTrades.filter(t => t.isClosed) as ClosedTrade[];
+    const allTimeNet = closed.reduce((s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+    let running = this.goalBalance - allTimeNet;
+
+    const sorted = [...closed].sort((a, b) =>
+      this.parseDate(a.closeDate).getTime() - this.parseDate(b.closeDate).getTime()
+    );
+
+    const byDay = new Map<string, ClosedTrade[]>();
+    for (const t of sorted) {
+      const d = this.parseDate(t.closeDate);
+      if (isNaN(d.getTime())) continue;
+      const key = d.toLocaleDateString('en-CA', { timeZone: NZT });
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key)!.push(t);
+    }
+
+    const stats = new Map<string, { netPnL: number; goalTarget: number; goalMet: boolean }>();
+    for (const [date, trades] of byDay) {
+      const start  = running;
+      const dayNet = trades.reduce((s, t) => s + (t.outcome === 'win' ? t.amount : -t.amount), 0);
+      const target = start * (this.goalTargetPct / 100);
+      stats.set(date, { netPnL: dayNet, goalTarget: target, goalMet: start > 0 && dayNet >= target });
+      running += dayNet;
+    }
+
+    // Build grid — always start on Monday
+    const firstOfMonth = new Date(this.calendarYear, this.calendarMonth, 1);
+    const totalDays    = new Date(this.calendarYear, this.calendarMonth + 1, 0).getDate();
+    // dow: 0=Sun…6=Sat → shift so Mon=0
+    const startDow = (firstOfMonth.getDay() + 6) % 7;
+
+    const cell = (year: number, month: number, day: number, inMonth: boolean): CalendarDay => {
+      const d = new Date(year, month, day);
+      const dateStr = d.toLocaleDateString('en-CA', { timeZone: NZT });
+      const s = stats.get(dateStr);
+      return {
+        date: dateStr,
+        dayNum: d.getDate(),
+        isCurrentMonth: inMonth,
+        isToday: dateStr === todayStr,
+        netPnL:     s?.netPnL     ?? 0,
+        goalTarget: s?.goalTarget ?? 0,
+        goalMet:    s ? s.goalMet : null,
+      };
+    };
+
+    const cells: CalendarDay[] = [];
+    for (let i = startDow - 1; i >= 0; i--)
+      cells.push(cell(this.calendarYear, this.calendarMonth, -i, false));
+    for (let d = 1; d <= totalDays; d++)
+      cells.push(cell(this.calendarYear, this.calendarMonth, d, true));
+    const trailing = (7 - (cells.length % 7)) % 7;
+    for (let i = 1; i <= trailing; i++)
+      cells.push(cell(this.calendarYear, this.calendarMonth + 1, i, false));
+
+    return cells;
   }
 
   get filteredTrades(): AnyTrade[] {
